@@ -14,5 +14,5 @@ git clone git@github.com:beyondlov1/Time_NLP.git
 cd Time_NLP
 python3 setup.py install
 
-cxfreeze qt-note.py --zip-include=${VIRTUAL_PYTHON_PATH}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=${VIRTUAL_PYTHON_PATH}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/
+cxfreeze qt-note.py --zip-include=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/
 ```
