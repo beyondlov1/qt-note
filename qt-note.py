@@ -320,6 +320,7 @@ if __name__ == "__main__":
     widget.show()
     widget.clear_edit_text()
     bs = BackgroundScheduler()
+    # 这里能直接add_job(job,"interval", seconds=30),cx_freeze打包会报错 https://www.cnblogs.com/ljbguanli/p/7218026.html
     trigger = IntervalTrigger(seconds=30)
     bs.add_job(check_and_notify, trigger)
     bs.start()
