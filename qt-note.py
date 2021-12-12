@@ -1,6 +1,7 @@
 from posixpath import dirname
 import sys
 import random
+import threading 
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import Qt, Signal
 import os
@@ -8,7 +9,10 @@ import json
 import uuid
 
 from TimeNormalizer import TimeNormalizer
+from apscheduler.schedulers.blocking import BlockingScheduler
 import arrow  # 引入包
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 
 tn = TimeNormalizer()
@@ -23,6 +27,9 @@ def readFile(path):
 def writeFile(path, content):
     with open(path, "w") as f:
         f.write(content)
+
+def get_path():
+    return os.path.join(dirname(sys.argv[0]), "note.list")
 
 
 class MyWidget(QtWidgets.QWidget):
@@ -43,6 +50,14 @@ class MyWidget(QtWidgets.QWidget):
         self.layout.addWidget(self.editText)
         self.layout.addWidget(self.list)
 
+        self.ct = Notifier()
+        self.ct.notified.connect(self.notify)
+
+    @QtCore.Slot(str)
+    def notify(self, msg):
+        self.dialog = CustomDialog(msg, parent=self)
+        self.dialog.show()
+        self.refresh_list()
 
     def init_list(self,list:QtWidgets.QListWidget, data):
         for datum in data:
@@ -58,19 +73,20 @@ class MyWidget(QtWidgets.QWidget):
     def write_to_list(self):
 
         value = self.editText.toPlainText()
-        parsed_obj = json.loads(tn.parse(self.editText.toPlainText()))
-        print(parsed_obj)
-        if "type" in parsed_obj and parsed_obj["type"] == "timestamp":
-            value = value+"|"+parsed_obj["timestamp"]
-        if "type" in parsed_obj and parsed_obj["type"] == "timedelta":
-            delta = parsed_obj["timedelta"]
-            arw = arrow.now().shift(years=delta["year"], months=delta["month"], days=delta["day"],
-                                    hours=delta["hour"], minutes=delta["minute"], seconds=delta["second"])
-            value = value+"|"+arw.format("YYYY-MM-DD HH:mm:ss")
+        if not "|" in value:
+            parsed_obj = json.loads(tn.parse(self.editText.toPlainText()))
+            print(parsed_obj)
+            if "type" in parsed_obj and parsed_obj["type"] == "timestamp":
+                value = value+"|"+parsed_obj["timestamp"]
+            if "type" in parsed_obj and parsed_obj["type"] == "timedelta":
+                delta = parsed_obj["timedelta"]
+                arw = arrow.now().shift(years=delta["year"], months=delta["month"], days=delta["day"],
+                                        hours=delta["hour"], minutes=delta["minute"], seconds=delta["second"])
+                value = value+"|"+arw.format("YYYY-MM-DD HH:mm:ss")
             
         next_select = 0
-        path = self.get_path()
-        contents = self.read_contents(path)
+        path = get_path()
+        contents = read_contents(path)
         if self.editText.getData() and self.editText.getData()["id"]:
             id = self.editText.getData()["id"]
             for content in contents:
@@ -88,28 +104,13 @@ class MyWidget(QtWidgets.QWidget):
 
     def refresh_list(self, select=0):
         self.list.clear()
-        path = self.get_path()
-        contents = self.read_contents(path)
+        path = get_path()
+        contents = read_contents(path)
         self.init_list(self.list, contents)
         if contents:
             self.list.setCurrentRow(select)
         else:
             self.focus_edit()
-
-    def get_path(self):
-        return os.path.join(dirname(sys.argv[0]),"note.list")
-        # return "/media/beyond/70f23ead-fa6d-4628-acf7-c82133c03245/home/beyond/Documents/python-project/qt/hello.list"
-
-    def read_contents(self, path):
-        if os.path.exists(path):
-            content = readFile(path)
-            if content:
-                contents = json.loads(content)
-            else:
-                contents = []
-        else:
-            contents = []
-        return contents
 
     @QtCore.Slot()
     def show_list_item(self):
@@ -124,7 +125,7 @@ class MyWidget(QtWidgets.QWidget):
         if self.list.selectedItems():
             item: QtWidgets.QListWidgetItem = self.list.selectedItems()[0]
             id = item.data(Qt.ItemDataRole.UserRole)["id"]
-            contents = self.read_contents(self.get_path())
+            contents = read_contents(get_path())
             index = -1
             for i in range(len(contents)):
                 if contents[i]["id"] == id:
@@ -132,7 +133,7 @@ class MyWidget(QtWidgets.QWidget):
                     break
             if index >= 0:
                 del contents[index]
-                writeFile(self.get_path(), json.dumps(contents))
+                writeFile(get_path(), json.dumps(contents))
                 select = index
                 if index == len(contents):
                     select = len(contents) - 1
@@ -237,11 +238,89 @@ class MyListItemWidget(QtWidgets.QWidget):
         self.box.addWidget(self.label)
         self.setLayout(self.box)
 
-            
+
+def read_contents(path):
+    if os.path.exists(path):
+        content = readFile(path)
+        if content:
+            contents = json.loads(content)
+        else:
+            contents = []
+    else:
+        contents = []
+    return contents
+
+
+def check_and_notify(path:str=get_path()):
+    contents = read_contents(path)
+    for content in contents:
+        obj = to_obj(content["value"])
+        if "due" in obj and obj["due"].timestamp() < arrow.now().timestamp() and not obj["reminded"]:
+            emit_notify_event(obj["value"])
+            obj["reminded"] = True
+            content["value"] = to_str(obj)
+    writeFile(path, json.dumps(contents))
+
+def emit_notify_event(msg:str):
+    widget.ct.send(msg)
+
+def to_obj(value:str):
+    result = {}
+    split = value.split("|")
+    result["value"] = split[0]
+    if len(split) == 2:
+        result["due"] = arrow.get(
+            split[1], "YYYY-MM-DD HH:mm:ss", tzinfo="local")
+        result["reminded"] = False
+    if len(split) == 3:
+        result["due"] = arrow.get(
+            split[1], "YYYY-MM-DD HH:mm:ss", tzinfo="local")
+        result["reminded"] = bool(split[2])
+    return result
+
+def to_str(obj):
+    return obj["value"]+"|"+obj["due"].format("YYYY-MM-DD HH:mm:ss")+"|"+str(obj["reminded"]).lower()
+
+
+class CustomDialog(QtWidgets.QDialog):
+    def __init__(self, msg,parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("HELLO!")
+
+        QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+
+        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+        self.layout = QtWidgets.QVBoxLayout()
+        message = QtWidgets.QLabel(msg)
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
+
+class Notifier(QtCore.QObject):
+
+    notified = Signal(str)
+
+    def __init__(self) -> None:
+        QtCore.QObject.__init__(self)
+
+    def send(self, msg):
+        self.notified.emit(msg)
+    
+    
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication([])
     widget = MyWidget()
     widget.resize(800, 600)
     widget.show()
     widget.clear_edit_text()
+    bs = BackgroundScheduler()
+    trigger = IntervalTrigger(seconds=30)
+    bs.add_job(check_and_notify, trigger)
+    bs.start()
     sys.exit(app.exec())
