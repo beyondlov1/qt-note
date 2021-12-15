@@ -12,7 +12,10 @@ pip3 install pyside6
 
 git clone git@github.com:beyondlov1/Time_NLP.git
 cd Time_NLP
-python3 setup.py install
+python3 Test.py
+sudo python3 setup.py install
+
+pip3 install apscheduler
 
 cxfreeze qt-note.py --zip-include=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/
 ```
