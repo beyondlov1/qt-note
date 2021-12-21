@@ -241,7 +241,11 @@ class MyListItemWidget(QtWidgets.QWidget):
     def rander(self, data):
         self.data = data
         content = self.data["value"]
-        self.label = QtWidgets.QLabel(content[:content.find("\n",20)+1])
+        end = len(content)
+        line_end_index = content.find("\n", 20)
+        if line_end_index > 0:
+            end = line_end_index + 1
+        self.label = QtWidgets.QLabel(content[:end].strip())
         self.box = QtWidgets.QVBoxLayout()
         self.box.setContentsMargins(0, 0, 0, 0)
         self.box.addWidget(self.label)
