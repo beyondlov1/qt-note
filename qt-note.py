@@ -3,7 +3,7 @@ import sys
 import random
 import threading 
 from PySide6 import QtCore, QtWidgets, QtGui
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 import os
 import json
 import uuid
@@ -41,6 +41,7 @@ class MyWidget(QtWidgets.QWidget):
         self.editText.ctrldown.connect(self.next)
         self.editText.ctrlup.connect(self.pre)
         self.editText.ctrldelete.connect(self.delete_item)
+        self.editText.ctrle.connect(self.show_list_item)
         self.list = MyListWidget()
         self.list.deleted.connect(self.delete_item)
         self.list.entered.connect(self.focus_edit)
@@ -117,6 +118,9 @@ class MyWidget(QtWidgets.QWidget):
         if self.list.selectedItems():
             item: QtWidgets.QListWidgetItem = self.list.selectedItems()[0]
             self.editText.rander(item.data(Qt.ItemDataRole.UserRole))
+            cursor = self.editText.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)  # 还可以有别的位置
+            self.editText.setTextCursor(cursor)
         else:
             self.clear_edit_text()
 
@@ -176,6 +180,7 @@ class MyTextEdit(QtWidgets.QTextEdit):
     ctrldown = Signal(QtWidgets.QTextEdit)
     ctrlup = Signal(QtWidgets.QTextEdit)
     ctrldelete = Signal(QtWidgets.QTextEdit)
+    ctrle = Signal(QtWidgets.QTextEdit)
     
     def __init__(self):
         QtWidgets.QTextEdit.__init__(self)
@@ -203,6 +208,9 @@ class MyTextEdit(QtWidgets.QTextEdit):
             self.ctrlup.emit(self)
         if event.key() == Qt.Key_Delete and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrldelete.emit(self)
+        if event.key() == Qt.Key_E and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
+            self.ctrle.emit(self)
+            
 
 class MyListWidget(QtWidgets.QListWidget):
 
@@ -232,7 +240,8 @@ class MyListItemWidget(QtWidgets.QWidget):
 
     def rander(self, data):
         self.data = data
-        self.label = QtWidgets.QLabel(self.data["value"])
+        content = self.data["value"]
+        self.label = QtWidgets.QLabel(content[:content.find("\n",20)])
         self.box = QtWidgets.QVBoxLayout()
         self.box.setContentsMargins(0, 0, 0, 0)
         self.box.addWidget(self.label)

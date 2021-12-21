@@ -4,7 +4,7 @@ from cx_Freeze import setup, Executable
 options = {
     'build_exe':
         {
-            'include_files': ['/usr/local/lib/python3.8/dist-packages/TimeConverter-1.1.0-py3.8.egg/resource/']  # 额外添加的文件 可以是文件夹
+            'include_files': ['resource']  # 额外添加的文件 可以是文件夹
         }
 }
 
