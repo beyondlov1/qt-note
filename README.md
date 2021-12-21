@@ -17,7 +17,14 @@ sudo python3 setup.py install
 
 pip3 install apscheduler
 
-cxfreeze qt-note.py --zip-include=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/
+venv:
+cxfreeze qt-note.py --zip-include=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ 
+
+normal:
+cxfreeze qt-note.py --zip-include=/usr/local/lib/python3.8/dist-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=/usr/local/lib/python3.8/dist-packages/TimeConverter-1.1.0-py3.8.egg/resource/ 
+
+--base-name=Win32GUI # 去除window黑框
+
 ```
 
 ### fix
