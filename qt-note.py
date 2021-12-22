@@ -1,7 +1,9 @@
 from posixpath import dirname
 import sys
 import random
-import threading 
+import threading
+from typing import Deque
+from unicodedata import name 
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import QSize, Qt, Signal
 import os
@@ -28,6 +30,7 @@ def writeFile(path, content):
     with open(path, "w") as f:
         f.write(content)
 
+
 def get_path():
     return os.path.join(dirname(sys.argv[0]), "note.list")
 
@@ -53,6 +56,7 @@ class MyWidget(QtWidgets.QWidget):
 
         self.ct = Notifier()
         self.ct.notified.connect(self.notify)
+        self.ct.refreshed.connect(self.refresh_list)
 
     @QtCore.Slot(str)
     def notify(self, msg):
@@ -97,7 +101,7 @@ class MyWidget(QtWidgets.QWidget):
                 next_select += 1
         else:
             contents.append(    
-                {"id": str(uuid.uuid4()), "value": value})
+                {"id": str(uuid.uuid4()), "value": value, "ctime":arrow.now().timestamp()})
             next_select = len(contents) - 1
         writeFile(path, json.dumps(contents))
         self.refresh_list(next_select)
@@ -170,7 +174,6 @@ class MyWidget(QtWidgets.QWidget):
     @QtCore.Slot()
     def clear_edit_text(self):
         self.editText.rander({})
-
 
 
 class MyTextEdit(QtWidgets.QTextEdit):
@@ -263,7 +266,6 @@ def read_contents(path):
         contents = []
     return contents
 
-
 def check_and_notify(path:str=get_path()):
     contents = read_contents(path)
     for content in contents:
@@ -317,6 +319,7 @@ class CustomDialog(QtWidgets.QDialog):
 class Notifier(QtCore.QObject):
 
     notified = Signal(str)
+    refreshed = Signal()
 
     def __init__(self) -> None:
         QtCore.QObject.__init__(self)
@@ -324,7 +327,75 @@ class Notifier(QtCore.QObject):
     def send(self, msg):
         self.notified.emit(msg)
     
-    
+    def refresh(self):
+        self.refreshed.emit()
+
+
+def get_dispatch_base():
+    return "/tmp/qt-tmp"
+
+def dispatch():
+    contents = read_contents(get_path())
+    changed = False
+    for content in contents[:]:
+        if "delete_stage" in content:
+            if content["delete_stage"] == 1:
+                dispatchOne(get_dispatch_base(),
+                            content["tag"], content["value_without_tag"])
+                content["delete_stage"] = 2
+                contents.remove(content)
+                changed = True
+            if content["delete_stage"] == 2:
+                contents.remove(content)
+                changed = True
+    for content in contents[:]:
+        value = content["value"]
+        if "@" in value:
+            tag_start_index = value.index("@")
+            space_index = value.find(" ", tag_start_index)
+            newline_index = value.find("\n", tag_start_index)
+            if newline_index == -1:
+                newline_index = sys.maxsize
+            if space_index == -1:
+                space_index = sys.maxsize
+            tag_end_index = min(space_index, newline_index)
+            tag = value[tag_start_index+1:tag_end_index]
+            if tag and ("due" not in content or not content["due"]):
+                if arrow.now().timestamp() - content["ctime"] < 1000*60*60:
+                    continue
+                content["delete_stage"] = 1
+                content["tag"] = tag
+                content["value_without_tag"] = value[:tag_start_index]
+                dispatchOne(get_dispatch_base(), tag, value[:tag_start_index])
+                content["delete_stage"] = 2
+                contents.remove(content)
+                changed = True
+    if changed:
+        writeFile(get_path(), json.dumps(contents))
+        widget.ct.refresh()
+
+
+def dispatchOne(base, name, value):
+    if not name.endswith(".md"):
+        name = name + ".md"
+    target_path = os.path.join(base, name)
+    with open(target_path, mode="a", encoding="utf-8") as f:
+        f.write("\n\n")
+        f.write(value)
+        f.write("\n")
+
+
+def list_names(dirpath):
+    file_items = []
+    names = os.listdir(dirpath)
+    for filename in names:
+        path = os.path.join(dirpath, filename)
+        if os.path.isfile(path):
+            file_items.append({"name": filename, "path": path})
+        if os.path.isdir(path):
+            continue
+    return file_items
+
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication([])
@@ -332,9 +403,16 @@ if __name__ == "__main__":
     widget.resize(800, 600)
     widget.show()
     widget.clear_edit_text()
+
     bs = BackgroundScheduler()
     # 这里能直接add_job(job,"interval", seconds=30),cx_freeze打包会报错 https://www.cnblogs.com/ljbguanli/p/7218026.html
     trigger = IntervalTrigger(seconds=30)
     bs.add_job(check_and_notify, trigger)
     bs.start()
+
+    dispatch_bs = BackgroundScheduler()
+    dispatch_trigger = IntervalTrigger(hours=1)
+    dispatch_bs.add_job(dispatch, dispatch_trigger)
+    dispatch_bs.start()
+
     sys.exit(app.exec())
