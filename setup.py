@@ -4,7 +4,7 @@ from cx_Freeze import setup, Executable
 options = {
     'build_exe':
         {
-            'include_files': ['resource']  # 额外添加的文件 可以是文件夹
+            'include_files': ['resource', 'config.json']  # 额外添加的文件 可以是文件夹
         }
 }
 

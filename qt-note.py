@@ -332,6 +332,12 @@ class Notifier(QtCore.QObject):
 
 
 def get_dispatch_base():
+    configpath = os.path.join(dirname(sys.argv[0]), "config.json")
+    if os.path.exists(configpath):
+        configjson = readFile()
+        configobj = json.loads(configjson)
+        if "dispatch_dir" in configobj:
+            return configobj["dispatch_dir"]
     return "/tmp/qt-tmp"
 
 def dispatch():
@@ -361,7 +367,7 @@ def dispatch():
             tag_end_index = min(space_index, newline_index)
             tag = value[tag_start_index+1:tag_end_index]
             if tag and ("due" not in content or not content["due"]):
-                if arrow.now().timestamp() - content["ctime"] < 1000*60*60:
+                if arrow.now().timestamp() - content["ctime"] < 60*60:
                     continue
                 content["delete_stage"] = 1
                 content["tag"] = tag
@@ -379,6 +385,8 @@ def dispatchOne(base, name, value):
     if not name.endswith(".md"):
         name = name + ".md"
     target_path = os.path.join(base, name)
+    if not os.path.exists(dirname(target_path)):
+        os.makedirs(dirname(target_path))
     with open(target_path, mode="a", encoding="utf-8") as f:
         f.write("\n\n")
         f.write(value)

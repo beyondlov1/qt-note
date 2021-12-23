@@ -1,5 +1,6 @@
 
 
+from posixpath import dirname
 from sys import maxsize
 
 import sys
@@ -24,10 +25,14 @@ a = "helo @hello world"
 
 
 def dispatchOne(base, name, value):
-    target_path = base+os.path.sep + name
+    if not name.endswith(".md"):
+        name = name + ".md"
+    target_path = os.path.join(base, name)
+    if not os.path.exists(dirname(target_path)):
+        os.makedirs(dirname(target_path))
     with open(target_path, mode="a", encoding="utf-8") as f:
         f.write("\n\n")
         f.write(value)
         f.write("\n")
 
-dispatchOne("/tmp","hello", "myworld")
+dispatchOne("/tmp/testyes","hello", "myworld")
