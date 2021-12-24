@@ -407,7 +407,7 @@ def list_names(dirpath):
 
 
 if __name__ == "__main__":
-    interval_sec = 60
+    interval_sec = 60*60
 
     app = QtWidgets.QApplication([])
     widget = MyWidget()
