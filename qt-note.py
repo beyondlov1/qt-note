@@ -334,11 +334,12 @@ class Notifier(QtCore.QObject):
 def get_dispatch_base():
     configpath = os.path.join(dirname(sys.argv[0]), "config.json")
     if os.path.exists(configpath):
-        configjson = readFile()
+        configjson = readFile(configpath)
         configobj = json.loads(configjson)
         if "dispatch_dir" in configobj:
             return configobj["dispatch_dir"]
-    return "/tmp/qt-tmp"
+    return None
+
 
 def dispatch():
     contents = read_contents(get_path())
@@ -367,7 +368,7 @@ def dispatch():
             tag_end_index = min(space_index, newline_index)
             tag = value[tag_start_index+1:tag_end_index]
             if tag and ("due" not in content or not content["due"]):
-                if arrow.now().timestamp() - content["ctime"] < 60*60:
+                if arrow.now().timestamp() - content["ctime"] < interval_sec:
                     continue
                 content["delete_stage"] = 1
                 content["tag"] = tag
@@ -406,6 +407,8 @@ def list_names(dirpath):
 
 
 if __name__ == "__main__":
+    interval_sec = 60
+
     app = QtWidgets.QApplication([])
     widget = MyWidget()
     widget.resize(800, 600)
@@ -418,9 +421,10 @@ if __name__ == "__main__":
     bs.add_job(check_and_notify, trigger)
     bs.start()
 
-    dispatch_bs = BackgroundScheduler()
-    dispatch_trigger = IntervalTrigger(hours=1)
-    dispatch_bs.add_job(dispatch, dispatch_trigger)
-    dispatch_bs.start()
+    if get_dispatch_base():    
+        dispatch_bs = BackgroundScheduler()
+        dispatch_trigger = IntervalTrigger(seconds=interval_sec)
+        dispatch_bs.add_job(dispatch, dispatch_trigger)
+        dispatch_bs.start()
 
     sys.exit(app.exec())
