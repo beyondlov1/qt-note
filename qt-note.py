@@ -1,3 +1,4 @@
+from logging import Formatter, handlers
 from posixpath import dirname
 import sys
 import random
@@ -15,10 +16,18 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import arrow  # 引入包
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+import logging
 
+
+logging.basicConfig(format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s',
+                    level=logging.INFO)
+logger = logging.getLogger("qt-note")
+handler = logging.FileHandler(filename=os.path.join(dirname(sys.argv[0]), "note.log"), mode="a")
+handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s'))
+logger.addHandler(handler)
 
 tn = TimeNormalizer()
-
 
 def readFile(path):
     with open(path, encoding="utf-8") as f:
@@ -38,6 +47,18 @@ def get_path():
 class MyWidget(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
+        
+        names = []
+        for item in list_name_items(get_dispatch_base()):
+            names.append(item['name'])
+        
+        self.lineEdit = QtWidgets.QLineEdit()
+        cp = QtWidgets.QCompleter(names)
+        cp.setCompletionMode(QtWidgets.QCompleter.CompletionMode.InlineCompletion)
+        self.lineEdit.setCompleter(cp)
+        self.lineEdit.returnPressed.connect(self.insert_filename)
+        
+        
         self.editText = MyTextEdit()
         self.editText.ctrlenter.connect(self.write_to_list)
         self.editText.ctrln.connect(self.clear_edit_text)
@@ -45,6 +66,7 @@ class MyWidget(QtWidgets.QWidget):
         self.editText.ctrlup.connect(self.pre)
         self.editText.ctrldelete.connect(self.delete_item)
         self.editText.ctrle.connect(self.show_list_item)
+        self.editText.at.connect(self.focus_line_edit)
         self.list = MyListWidget()
         self.list.deleted.connect(self.delete_item)
         self.list.entered.connect(self.focus_edit)
@@ -52,11 +74,23 @@ class MyWidget(QtWidgets.QWidget):
         self.refresh_list()
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.addWidget(self.editText)
+        self.layout.addWidget(self.lineEdit)
         self.layout.addWidget(self.list)
 
         self.ct = Notifier()
         self.ct.notified.connect(self.notify)
         self.ct.refreshed.connect(self.refresh_list)
+
+    @QtCore.Slot()
+    def focus_line_edit(self):
+        self.lineEdit.setFocus()
+
+    @QtCore.Slot()
+    def insert_filename(self):
+        text = self.lineEdit.text()
+        self.editText.insertPlainText(text)
+        self.lineEdit.clear()
+        self.editText.setFocus()
 
     @QtCore.Slot(str)
     def notify(self, msg):
@@ -184,6 +218,7 @@ class MyTextEdit(QtWidgets.QTextEdit):
     ctrlup = Signal(QtWidgets.QTextEdit)
     ctrldelete = Signal(QtWidgets.QTextEdit)
     ctrle = Signal(QtWidgets.QTextEdit)
+    at = Signal(QtWidgets.QTextEdit)
     
     def __init__(self):
         QtWidgets.QTextEdit.__init__(self)
@@ -201,6 +236,8 @@ class MyTextEdit(QtWidgets.QTextEdit):
     
     def keyPressEvent(self, event: QtGui.QKeyEvent):
         QtWidgets.QTextEdit.keyPressEvent(self,event)
+        if event.key() == Qt.Key_At:
+            self.at.emit(self)
         if event.key() == Qt.Key_Return and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrlenter.emit(self)
         if event.key() == Qt.Key_N and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
@@ -378,8 +415,10 @@ def dispatch():
                 contents.remove(content)
                 changed = True
     if changed:
+        logger.info("dispatch save start")
         writeFile(get_path(), json.dumps(contents))
         widget.ct.refresh()
+        logger.info("dispatch save end")
 
 
 def dispatchOne(base, name, value):
@@ -394,7 +433,7 @@ def dispatchOne(base, name, value):
         f.write("\n")
 
 
-def list_names(dirpath):
+def list_name_items(dirpath):
     file_items = []
     names = os.listdir(dirpath)
     for filename in names:
