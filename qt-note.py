@@ -13,10 +13,12 @@ import uuid
 
 from TimeNormalizer import TimeNormalizer
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.util import timedelta_seconds
 import arrow  # 引入包
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import logging
+from datetime import datetime, timedelta
 
 
 logging.basicConfig(format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s',
@@ -98,19 +100,18 @@ class MyWidget(QtWidgets.QWidget):
         self.dialog.show()
         self.refresh_list()
 
-    def init_list(self,list:QtWidgets.QListWidget, data):
+    def init_list(self,qlist:QtWidgets.QListWidget, data):
         for datum in data:
-            item = QtWidgets.QListWidgetItem(list)
+            item = QtWidgets.QListWidgetItem(qlist)
             item.setData(Qt.ItemDataRole.UserRole,datum)
             widget = MyListItemWidget()
             widget.rander(datum)
             item.setSizeHint(widget.sizeHint())
-            list.setItemWidget(item, widget)
-            list.addItem(item)
+            qlist.setItemWidget(item, widget)
+            qlist.addItem(item)
             
     @QtCore.Slot()
     def write_to_list(self):
-
         value = self.editText.toPlainText()
         if not "|" in value:
             parsed_obj = json.loads(tn.parse(self.editText.toPlainText()))
@@ -462,7 +463,8 @@ if __name__ == "__main__":
 
     if get_dispatch_base():    
         dispatch_bs = BackgroundScheduler()
-        dispatch_trigger = IntervalTrigger(seconds=interval_sec)
+        dispatch_trigger = IntervalTrigger(
+            seconds=interval_sec, start_date=datetime.now()+timedelta(seconds=30))
         dispatch_bs.add_job(dispatch, dispatch_trigger)
         dispatch_bs.start()
 
