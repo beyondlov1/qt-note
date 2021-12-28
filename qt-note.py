@@ -239,7 +239,7 @@ class MyTextEdit(QtWidgets.QTextEdit):
         QtWidgets.QTextEdit.keyPressEvent(self,event)
         if event.key() == Qt.Key_At:
             self.at.emit(self)
-        if (event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter) and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
+        if event.key() == Qt.Key_Return and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrlenter.emit(self)
         if event.key() == Qt.Key_N and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrln.emit(self)
