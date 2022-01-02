@@ -93,6 +93,7 @@ class MyWidget(QtWidgets.QWidget):
         self.editText.insertPlainText(text)
         self.lineEdit.clear()
         self.editText.setFocus()
+        self.write_to_list()
 
     @QtCore.Slot(str)
     def notify(self, msg):
