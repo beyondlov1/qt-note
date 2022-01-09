@@ -41,8 +41,28 @@ def writeFile(path, content):
     with open(path, "w") as f:
         f.write(content)
 
+def get_config():
+    configpath = os.path.join(dirname(sys.argv[0]), "config.json")
+    if os.path.exists(configpath):
+        configjson = readFile(configpath)
+        configobj = json.loads(configjson)
+        return configobj
+    else:
+        return {}
+
+def get_or_none(obj,key):
+    if key in obj:
+        return obj[key]
+    else:
+        return None
+
+def get_dispatch_base():
+    return get_or_none(get_config(), "dispatch_dir")
 
 def get_path():
+    path = get_or_none(get_config(), "note_path"())
+    if path:
+        return path
     return os.path.join(dirname(sys.argv[0]), "note.list")
 
 
@@ -370,15 +390,6 @@ class Notifier(QtCore.QObject):
         self.refreshed.emit()
 
 
-def get_dispatch_base():
-    configpath = os.path.join(dirname(sys.argv[0]), "config.json")
-    if os.path.exists(configpath):
-        configjson = readFile(configpath)
-        configobj = json.loads(configjson)
-        if "dispatch_dir" in configobj:
-            return configobj["dispatch_dir"]
-    return None
-
 
 def dispatch():
     contents = read_contents(get_path())
@@ -453,6 +464,11 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication([])
     widget = MyWidget()
     widget.resize(800, 600)
+    widget.move(widget.width() * -2, 0)
+    desktop = QtWidgets.QApplication.primaryScreen().availableVirtualGeometry()
+    x = (desktop.width() - widget.frameSize().width())
+    y = (desktop.height() - widget.frameSize().height()) 
+    widget.move(x,y)
     widget.show()
     widget.clear_edit_text()
 
