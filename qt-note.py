@@ -60,7 +60,7 @@ def get_dispatch_base():
     return get_or_none(get_config(), "dispatch_dir")
 
 def get_path():
-    path = get_or_none(get_config(), "note_path"())
+    path = get_or_none(get_config(), "note_path")
     if path:
         return path
     return os.path.join(dirname(sys.argv[0]), "note.list")
@@ -272,7 +272,14 @@ class MyTextEdit(QtWidgets.QTextEdit):
             self.ctrldelete.emit(self)
         if event.key() == Qt.Key_E and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrle.emit(self)
-            
+    
+    def focusInEvent(self, QFocusEvent):
+        self.setStyleSheet(
+            "border-width:1;border-color:red;border-style:outset")
+
+    def focusOutEvent(self, QFocusEvent):
+        self.setStyleSheet(
+            "border-width:1;border-color:grey;border-style:outset")
 
 class MyListWidget(QtWidgets.QListWidget):
 
