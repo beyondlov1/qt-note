@@ -1,4 +1,6 @@
+from genericpath import exists
 from logging import Formatter, handlers
+from math import fabs
 from posixpath import dirname
 import sys
 import random
@@ -19,6 +21,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import logging
 from datetime import datetime, timedelta
+from Cryptodome.Cipher import AES
+import operator                     # 导入 operator，用于比较原始数据与加解密后的数据
 
 
 logging.basicConfig(format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s',
@@ -37,8 +41,19 @@ def readFile(path):
         return contents
 
 
+def breadFile(path):
+    with open(path, mode="rb") as f:
+        contents = f.read()
+        return contents
+
+
 def writeFile(path, content):
     with open(path, "w") as f:
+        f.write(content)
+
+
+def bwriteFile(path, content):
+    with open(path, "wb") as f:
         f.write(content)
 
 def get_config():
@@ -64,6 +79,18 @@ def get_path():
     if path:
         return path
     return os.path.join(dirname(sys.argv[0]), "note.list")
+
+
+def get_git_dir():
+    return get_or_none(get_config(), "git_dir")
+
+
+def get_key():
+    key = get_or_none(get_config(), "key")
+    if key:
+        return key.encode()
+    else:
+        return None
 
 
 class MyWidget(QtWidgets.QWidget):
@@ -332,6 +359,14 @@ def read_contents(path):
         contents = []
     return contents
 
+
+def parse_contents(contentstr):
+        if contentstr:
+            contents = json.loads(contentstr)
+        else:
+            contents = []
+        return contents
+
 def check_and_notify(path:str=get_path()):
     contents = read_contents(path)
     for content in contents:
@@ -465,6 +500,66 @@ def list_name_items(dirpath):
     return file_items
 
 
+AES_BLOCK_SIZE = AES.block_size     # AES 加密数据块大小, 只能是16
+AES_KEY_SIZE = 16
+
+# 待加密文本补齐到 block size 的整数倍
+def padContent(bytes):
+    while len(bytes) % AES_BLOCK_SIZE != 0:     # 循环直到补齐 AES_BLOCK_SIZE 的倍数
+        bytes += ' '.encode()                   # 通过补空格（不影响源文件的可读）来补齐
+    return bytes                                # 返回补齐后的字节列表
+
+# 待加密的密钥补齐到对应的位数
+def padKey(key):
+    if len(key) > AES_KEY_SIZE:                 # 如果密钥长度超过 AES_KEY_SIZE
+        return key[:AES_KEY_SIZE]               # 截取前面部分作为密钥并返回
+    while len(key) % AES_KEY_SIZE != 0:         # 不到 AES_KEY_SIZE 长度则补齐
+        key += ' '.encode()                     # 补齐的字符可用任意字符代替
+    return key                                  # 返回补齐后的密钥
+
+# AES 加密
+def encrypt(key, bytes):
+    # 新建一个 AES 算法实例，使用 ECB（电子密码本）模式
+    myCipher = AES.new(padKey(key), AES.MODE_ECB)
+    encryptData = myCipher.encrypt(padContent(bytes))       # 调用加密方法，得到加密后的数据
+    return encryptData                          # 返回加密数据
+
+# AES 解密
+def decrypt(key, encryptData):
+    # 新建一个 AES 算法实例，使用 ECB（电子密码本）模式
+    myCipher = AES.new(padKey(key), AES.MODE_ECB)
+    bytes = myCipher.decrypt(encryptData)       # 调用解密方法，得到解密后的数据
+    return bytes                                # 返回解密数据
+
+def git_sync():
+    contents = read_contents(get_path())
+    oldlen = len(contents)
+    os.system("cd "+get_git_dir()+"&& git pull")
+    enotepath = os.path.join(get_git_dir(), "note.list.e")
+    if os.path.exists(enotepath):
+        enotebytes = breadFile(enotepath)
+        econtents = parse_contents(decrypt(get_key(), enotebytes).decode("utf-8"))
+        print(json.dumps(econtents))
+        for econtent in econtents:
+            found = False
+            for content in contents:
+                if(content["id"] == econtent["id"]):
+                    found = True
+                    break
+            if not found:
+                contents.append(econtent)
+    newcontentsstr = json.dumps(contents)
+    writeFile(get_path(),newcontentsstr)
+    newenotebytes = encrypt(get_key(), breadFile(get_path()))
+    needpush = not operator.eq(enotebytes, newenotebytes)
+    if needpush:
+        bwriteFile(enotepath, newenotebytes)
+        print("need push")
+        os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
+    if len(contents) != oldlen:
+        widget.ct.refresh()
+
+
 if __name__ == "__main__":
     interval_sec = 60*60
 
@@ -491,5 +586,12 @@ if __name__ == "__main__":
             seconds=interval_sec, start_date=datetime.now()+timedelta(seconds=30))
         dispatch_bs.add_job(dispatch, dispatch_trigger)
         dispatch_bs.start()
+    
+    if get_git_dir():
+        git_bs = BackgroundScheduler()
+        git_trigger = IntervalTrigger(
+            seconds=30, start_date=datetime.now()+timedelta(seconds=5))
+        git_bs.add_job(git_sync, git_trigger)
+        git_bs.start()
 
     sys.exit(app.exec())
