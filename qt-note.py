@@ -1,12 +1,9 @@
-from genericpath import exists
 from logging import Formatter, handlers
 from math import fabs
 from posixpath import dirname
 import sys
 import random
 import threading
-from typing import Deque
-from unicodedata import name 
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import QSize, Qt, Signal
 import os
@@ -79,6 +76,13 @@ def get_path():
     if path:
         return path
     return os.path.join(dirname(sys.argv[0]), "note.list")
+
+
+def get_dellog_path():
+    path = get_or_none(get_config(), "delnote_path")
+    if path:
+        return path
+    return os.path.join(dirname(sys.argv[0]), "note.dellog")
 
 
 def get_git_dir():
@@ -223,6 +227,10 @@ class MyWidget(QtWidgets.QWidget):
                     index = i
                     break
             if index >= 0:
+                dellog = read_contents(get_dellog_path())
+                dellog.append(contents[index])
+                writeFile(get_dellog_path(), json.dumps(dellog))
+                print("dellog:"+json.dumps(dellog))
                 del contents[index]
                 writeFile(get_path(), json.dumps(contents))
                 select = index
@@ -531,11 +539,18 @@ def decrypt(key, encryptData):
     bytes = myCipher.decrypt(encryptData)       # 调用解密方法，得到解密后的数据
     return bytes                                # 返回解密数据
 
+def getitembyid(notelist, id):
+    for noteitem in notelist:
+        if noteitem["id"] == id:
+            return noteitem
+    return None
+
 def git_sync():
     contents = read_contents(get_path())
     oldlen = len(contents)
     os.system("cd "+get_git_dir()+"&& git pull")
     enotepath = os.path.join(get_git_dir(), "note.list.e")
+    enotebytes = b''
     if os.path.exists(enotepath):
         enotebytes = breadFile(enotepath)
         econtents = parse_contents(decrypt(get_key(), enotebytes).decode("utf-8"))
@@ -547,7 +562,15 @@ def git_sync():
                     found = True
                     break
             if not found:
-                contents.append(econtent)
+                dellog = read_contents(get_dellog_path())
+                dellogitem = getitembyid(dellog, econtent["id"])
+                if dellogitem:
+                    if dellogitem != econtent:
+                        contents.append(econtent)
+                else:
+                    contents.append(econtent)
+    if os.path.exists(get_dellog_path()):
+        os.remove(get_dellog_path())
     newcontentsstr = json.dumps(contents)
     writeFile(get_path(),newcontentsstr)
     newenotebytes = encrypt(get_key(), breadFile(get_path()))
