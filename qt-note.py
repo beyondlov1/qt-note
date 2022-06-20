@@ -96,6 +96,11 @@ def get_key():
     else:
         return None
 
+def adddellogitem(item):
+    dellog = read_contents(get_dellog_path())
+    dellog.append(item)
+    writeFile(get_dellog_path(), json.dumps(dellog))
+    print("dellog:"+json.dumps(dellog))
 
 class MyWidget(QtWidgets.QWidget):
     def __init__(self):
@@ -227,10 +232,7 @@ class MyWidget(QtWidgets.QWidget):
                     index = i
                     break
             if index >= 0:
-                dellog = read_contents(get_dellog_path())
-                dellog.append(contents[index])
-                writeFile(get_dellog_path(), json.dumps(dellog))
-                print("dellog:"+json.dumps(dellog))
+                adddellogitem(contents[index])
                 del contents[index]
                 writeFile(get_path(), json.dumps(contents))
                 select = index
@@ -450,9 +452,11 @@ def dispatch():
                 dispatchOne(get_dispatch_base(),
                             content["tag"], content["value_without_tag"])
                 content["delete_stage"] = 2
+                adddellogitem(content)
                 contents.remove(content)
                 changed = True
             if content["delete_stage"] == 2:
+                adddellogitem(content)
                 contents.remove(content)
                 changed = True
     for content in contents[:]:
@@ -475,6 +479,7 @@ def dispatch():
                 content["value_without_tag"] = value[:tag_start_index]
                 dispatchOne(get_dispatch_base(), tag, value[:tag_start_index])
                 content["delete_stage"] = 2
+                adddellogitem(content)
                 contents.remove(content)
                 changed = True
     if changed:
@@ -565,12 +570,12 @@ def git_sync():
                 dellog = read_contents(get_dellog_path())
                 dellogitem = getitembyid(dellog, econtent["id"])
                 if dellogitem:
-                    if dellogitem != econtent:
+                    if dellogitem["value"] != econtent["value"]:
                         contents.append(econtent)
                 else:
                     contents.append(econtent)
-    if os.path.exists(get_dellog_path()):
-        os.remove(get_dellog_path())
+    # if os.path.exists(get_dellog_path()):
+    #     os.remove(get_dellog_path())
     newcontentsstr = json.dumps(contents)
     writeFile(get_path(),newcontentsstr)
     newenotebytes = encrypt(get_key(), breadFile(get_path()))
