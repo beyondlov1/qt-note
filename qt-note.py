@@ -166,7 +166,7 @@ class MyWidget(QtWidgets.QWidget):
     def write_to_list(self):
         value = self.editText.toPlainText()
         if not "|" in value:
-            parsed_obj = json.loads(tn.parse(self.editText.toPlainText()))
+            parsed_obj = json.loads(tn.parse(self.editText.toPlainText(), timeBase = arrow.now()))
             print(parsed_obj)
             if "type" in parsed_obj and parsed_obj["type"] == "timestamp":
                 value = value+"|"+parsed_obj["timestamp"]
