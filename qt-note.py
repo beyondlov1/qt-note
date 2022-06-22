@@ -77,6 +77,8 @@ def get_path():
         return path
     return os.path.join(dirname(sys.argv[0]), "note.list")
 
+def get_ibuf_path():
+    return get_path()+".ibuf"
 
 def get_dellog_path():
     path = get_or_none(get_config(), "delnote_path")
@@ -183,28 +185,33 @@ class MyWidget(QtWidgets.QWidget):
             
         next_select = 0
         path = get_path()
-        contents = read_contents(path)
+        ctuple = read_all(path)
+        contents = ctuple[2]
+        ibuf = ctuple[1]
+        all = ctuple[0]
         if self.editText.getData() and self.editText.getData()["id"]:
             id = self.editText.getData()["id"]
-            for content in contents:
+            for content in all:
                 if content["id"] == id:
                     content["value"] = value
+                    content["mtime"] = arrow.now().timestamp()
                     break
                 next_select += 1
         else:
-            contents.append(    
-                {"id": str(uuid.uuid4()), "value": value, "ctime":arrow.now().timestamp()})
-            next_select = len(contents) - 1
+            ibuf.append(    
+                {"id": str(uuid.uuid4()), "value": value, "ctime":arrow.now().timestamp(), "mtime": arrow.now().timestamp()})
+            next_select = len(all) - 1
         writeFile(path, json.dumps(contents))
+        writeFile(get_ibuf_path(), json.dumps(ibuf))
         self.refresh_list(next_select)
         self.clear_edit_text()
 
     def refresh_list(self, select=0):
         self.list.clear()
         path = get_path()
-        contents = read_contents(path)
-        self.init_list(self.list, contents)
-        if contents:
+        ctuple = read_all(path)
+        self.init_list(self.list, ctuple[0])
+        if ctuple[0]:
             self.list.setCurrentRow(select)
         else:
             self.focus_edit()
@@ -367,7 +374,39 @@ def read_contents(path):
             contents = []
     else:
         contents = []
+    
     return contents
+
+def read_ibuf(path):
+    contents = []
+    insertbufpath = get_ibuf_path()
+    if os.path.exists(insertbufpath):
+        icontent = readFile(insertbufpath)
+        if icontent:
+            insertbuf = json.loads(icontent)
+            for item in insertbuf:
+                contents.append(item)
+        else:
+            contents = []
+    return contents
+
+def sort_ctime(x):
+    return x["ctime"]
+
+def read_all(path):
+    contents = read_contents(path)
+    contents.sort(key=sort_ctime)
+    ibuf = read_ibuf(path)
+    ibuf.sort(key=sort_ctime)
+    all = []
+    add_all(all, contents)
+    add_all(all, ibuf)
+    all.sort(key=sort_ctime)
+    return (all, ibuf, contents)
+
+def add_all(list, toaddlist):
+    for toadd in toaddlist:
+        list.append(toadd)
 
 
 def parse_contents(contentstr):
@@ -377,15 +416,26 @@ def parse_contents(contentstr):
             contents = []
         return contents
 
-def check_and_notify(path:str=get_path()):
-    contents = read_contents(path)
-    for content in contents:
+def check_and_notify():
+    path = get_path()
+    ctuple = read_all(path)
+    all = ctuple[0]
+    ibuf = ctuple[1]
+    contents = ctuple[2]
+    ibufchanged = False
+    contentschanged = False
+    for content in all:
         obj = to_obj(content["value"])
         if "due" in obj and obj["due"].timestamp() < arrow.now().timestamp() and not obj["reminded"]:
             emit_notify_event(obj["value"])
             obj["reminded"] = True
             content["value"] = to_str(obj)
-    writeFile(path, json.dumps(contents))
+            ibufchanged = content in ibuf
+            contentschanged = content in contents
+    if contentschanged:
+        writeFile(path, json.dumps(ctuple[2]))
+    if ibufchanged:
+        writeFile(get_ibuf_path(), json.dumps(ctuple[1]))
 
 def emit_notify_event(msg:str):
     widget.ct.send(msg)
@@ -442,24 +492,31 @@ class Notifier(QtCore.QObject):
         self.refreshed.emit()
 
 
+def saferemove(list, item):
+    if item in list:
+        list.remove(item)
 
 def dispatch():
-    contents = read_contents(get_path())
+    ctuple = read_all(get_path())
+    contents = ctuple[2]
+    ibuf = ctuple[1]
     changed = False
-    for content in contents[:]:
+    for content in ctuple[0]:
         if "delete_stage" in content:
             if content["delete_stage"] == 1:
                 dispatchOne(get_dispatch_base(),
                             content["tag"], content["value_without_tag"])
                 content["delete_stage"] = 2
                 adddellogitem(content)
-                contents.remove(content)
+                saferemove(contents,content)
+                saferemove(ibuf, content)
                 changed = True
             if content["delete_stage"] == 2:
                 adddellogitem(content)
-                contents.remove(content)
+                saferemove(contents,content)
+                saferemove(ibuf, content)
                 changed = True
-    for content in contents[:]:
+    for content in ctuple[0]:
         value = content["value"]
         if "@" in value:
             tag_start_index = value.index("@")
@@ -480,11 +537,13 @@ def dispatch():
                 dispatchOne(get_dispatch_base(), tag, value[:tag_start_index])
                 content["delete_stage"] = 2
                 adddellogitem(content)
-                contents.remove(content)
+                saferemove(contents,content)
+                saferemove(ibuf, content)
                 changed = True
     if changed:
         logger.info("dispatch save start")
         writeFile(get_path(), json.dumps(contents))
+        writeFile(get_ibuf_path(), json.dumps(ibuf))
         widget.ct.refresh()
         logger.info("dispatch save end")
 
@@ -551,7 +610,9 @@ def getitembyid(notelist, id):
     return None
 
 def git_sync():
-    contents = read_contents(get_path())
+    ctuple = read_all(get_path())
+    contents = ctuple[2]
+    ibuf = ctuple[1]
     oldlen = len(contents)
     os.system("cd "+get_git_dir()+"&& git pull")
     enotepath = os.path.join(get_git_dir(), "note.list.e")
@@ -574,9 +635,15 @@ def git_sync():
                         contents.append(econtent)
                 else:
                     contents.append(econtent)
-    # if os.path.exists(get_dellog_path()):
-    #     os.remove(get_dellog_path())
-    newcontentsstr = json.dumps(contents)
+        
+        newcontents = []
+        for content in contents:
+            newcontents.append(content)
+        for content in ibuf:
+            newcontents.append(content)
+        newcontents.sort(key=sort_ctime)
+ 
+    newcontentsstr = json.dumps(newcontents)
     writeFile(get_path(),newcontentsstr)
     newenotebytes = encrypt(get_key(), breadFile(get_path()))
     needpush = not operator.eq(enotebytes, newenotebytes)
@@ -584,8 +651,14 @@ def git_sync():
         bwriteFile(enotepath, newenotebytes)
         print("need push")
         os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
-    if len(contents) != oldlen:
+    if len(newcontents) != oldlen:
         widget.ct.refresh()
+
+    ibufpath = get_ibuf_path()
+    # if os.path.exists(get_dellog_path()):
+    #     os.remove(get_dellog_path())
+    if os.path.exists(ibufpath):
+        os.remove(ibufpath)
 
 
 if __name__ == "__main__":
