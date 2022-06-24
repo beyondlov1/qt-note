@@ -4,6 +4,7 @@ from posixpath import dirname
 import sys
 import random
 import threading
+import zlib
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import QSize, Qt, Signal
 import os
@@ -609,17 +610,25 @@ def getitembyid(notelist, id):
             return noteitem
     return None
 
+def compress(bytes_message):
+    compressed = zlib.compress(bytes_message, zlib.Z_BEST_COMPRESSION)
+    return compressed
+
+def decompress(compressed):
+    return zlib.decompress(compressed)
+
 def git_sync():
     ctuple = read_all(get_path())
     contents = ctuple[2]
     ibuf = ctuple[1]
     oldlen = len(contents)
     os.system("cd "+get_git_dir()+"&& git pull")
-    enotepath = os.path.join(get_git_dir(), "note.list.e")
+    enotepath = os.path.join(get_git_dir(), "note.list.ze")
     enotebytes = b''
+    newcontents = []
     if os.path.exists(enotepath):
         enotebytes = breadFile(enotepath)
-        econtents = parse_contents(decrypt(get_key(), enotebytes).decode("utf-8"))
+        econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
         print(json.dumps(econtents))
         for econtent in econtents:
             found = False
@@ -636,16 +645,17 @@ def git_sync():
                 else:
                     contents.append(econtent)
         
-        newcontents = []
         for content in contents:
             newcontents.append(content)
         for content in ibuf:
             newcontents.append(content)
         newcontents.sort(key=sort_ctime)
+    else:
+        newcontents = contents
  
     newcontentsstr = json.dumps(newcontents)
     writeFile(get_path(),newcontentsstr)
-    newenotebytes = encrypt(get_key(), breadFile(get_path()))
+    newenotebytes = encrypt(get_key(),compress(breadFile(get_path())))
     needpush = not operator.eq(enotebytes, newenotebytes)
     if needpush:
         bwriteFile(enotepath, newenotebytes)
