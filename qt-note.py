@@ -2,9 +2,8 @@ from logging import Formatter, handlers
 from math import fabs
 from posixpath import dirname
 import sys
-import random
-import threading
 import zlib
+
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import QSize, Qt, Signal
 import os
@@ -498,6 +497,7 @@ def saferemove(list, item):
         list.remove(item)
 
 def dispatch():
+    git_sync()
     ctuple = read_all(get_path())
     contents = ctuple[2]
     ibuf = ctuple[1]
@@ -546,6 +546,7 @@ def dispatch():
         writeFile(get_path(), json.dumps(contents))
         writeFile(get_ibuf_path(), json.dumps(ibuf))
         widget.ct.refresh()
+        git_sync()
         logger.info("dispatch save end")
 
 
@@ -617,6 +618,35 @@ def compress(bytes_message):
 def decompress(compressed):
     return zlib.decompress(compressed)
 
+def eqvalue(item1,item2):
+    return item1["value"] == item2["value"]
+
+def getnewer(item1,item2):
+    if item1["mtime"] > item2["mtime"]:
+        return item1
+    else:
+        return item2
+    
+
+def replaceallbyid(contents, targets):
+    replacemapping = {}
+    i = 0
+    for content in contents:
+        found = getitembyid(targets, content["id"])
+        if found:
+            replacemapping[str(i)] = found
+        i=i+1
+    for (j, value) in enumerate(replacemapping):
+        contents[int(j)] = value
+
+
+def removeallbyid(contents:list, targets):
+    for target in targets:
+        found = getitembyid(contents, target["id"])
+        if found:
+            contents.remove(found)
+
+
 def git_sync():
     ctuple = read_all(get_path())
     contents = ctuple[2]
@@ -630,20 +660,41 @@ def git_sync():
         enotebytes = breadFile(enotepath)
         econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
         print(json.dumps(econtents))
+        remoteadded = []
+        remoteremoved = []
+        remotechanged = []
         for econtent in econtents:
-            found = False
-            for content in contents:
-                if(content["id"] == econtent["id"]):
-                    found = True
-                    break
-            if not found:
+            foundinlocal = getitembyid(contents, econtent["id"])
+            if foundinlocal:
+                # 本地找到了, 看看是否修改过
+                if not eqvalue(foundinlocal, econtent):
+                    newer = getnewer(foundinlocal, econtent)
+                    if newer == econtent:
+                        remotechanged.append(newer)
+                else:
+                    # no changed
+                    pass
+            else:
+                # 在本地没找到, 是否本地删除
                 dellog = read_contents(get_dellog_path())
                 dellogitem = getitembyid(dellog, econtent["id"])
                 if dellogitem:
-                    if dellogitem["value"] != econtent["value"]:
-                        contents.append(econtent)
+                    if not eqvalue(dellogitem, econtent):
+                        # 本地删除了, 但是remote修改过了
+                        remoteadded.append(econtent)
+                    else: 
+                        # 本地删除了
+                        pass
                 else:
-                    contents.append(econtent)
+                    # 本地没删除, remote添加的
+                    remoteadded.append(econtent)
+        for content in contents:
+            foundinremote = getitembyid(econtents, content["id"])
+            if not foundinremote:
+                remoteremoved.append(content)
+        add_all(contents, remoteadded)
+        replaceallbyid(contents, remotechanged)
+        removeallbyid(contents, remoteremoved)
         
         for content in contents:
             newcontents.append(content)
