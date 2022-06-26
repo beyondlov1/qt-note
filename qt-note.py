@@ -560,7 +560,7 @@ def dispatchOne(base, name, value):
         # 防止重复添加
         content = readFile(target_path)
         if content.strip().endswith(value):
-            return;
+            return
     with open(target_path, mode="a", encoding="utf-8") as f:
         f.write("\n\n")
         f.write(value)
