@@ -653,78 +653,89 @@ def removeallbyid(contents:list, targets):
 
 
 def git_sync():
-    ctuple = read_all(get_path())
-    contents = ctuple[2]
-    ibuf = ctuple[1]
-    oldlen = len(contents)
-    os.system("cd "+get_git_dir()+"&& git pull")
-    enotepath = os.path.join(get_git_dir(), "note.list.ze")
-    enotebytes = b''
-    newcontents = []
-    if os.path.exists(enotepath):
-        enotebytes = breadFile(enotepath)
-        econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
-        print(json.dumps(econtents))
-        remoteadded = []
-        remoteremoved = []
-        remotechanged = []
-        for econtent in econtents:
-            foundinlocal = getitembyid(contents, econtent["id"])
-            if foundinlocal:
-                # 本地找到了, 看看是否修改过
-                if not eqvalue(foundinlocal, econtent):
-                    newer = getnewer(foundinlocal, econtent)
-                    if newer == econtent:
-                        remotechanged.append(newer)
-                else:
-                    # no changed
-                    pass
-            else:
-                # 在本地没找到, 是否本地删除
-                dellog = read_contents(get_dellog_path())
-                dellogitem = getitembyid(dellog, econtent["id"])
-                if dellogitem:
-                    if not eqvalue(dellogitem, econtent):
-                        # 本地删除了, 但是remote修改过了
-                        remoteadded.append(econtent)
-                    else: 
-                        # 本地删除了
+    path = get_path()
+    synclckpath = path + ".lck"
+    try:
+        os.symlink(path, synclckpath)
+    except FileExistsError:
+        logger.info("git sync locked, abort.(rm %s)", synclckpath)
+        return
+    try:
+        ctuple = read_all(path)
+        contents = ctuple[2]
+        ibuf = ctuple[1]
+        oldlen = len(contents)
+        oldcontents = ctuple[0][:]
+        os.system("cd "+get_git_dir()+"&& git pull")
+        enotepath = os.path.join(get_git_dir(), "note.list.ze")
+        enotebytes = b''
+        newcontents = []
+        if os.path.exists(enotepath):
+            enotebytes = breadFile(enotepath)
+            econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
+            print(json.dumps(econtents))
+            remoteadded = []
+            remoteremoved = []
+            remotechanged = []
+            for econtent in econtents:
+                foundinlocal = getitembyid(contents, econtent["id"])
+                if foundinlocal:
+                    # 本地找到了, 看看是否修改过
+                    if not eqvalue(foundinlocal, econtent):
+                        newer = getnewer(foundinlocal, econtent)
+                        if newer == econtent:
+                            remotechanged.append(newer)
+                    else:
+                        # no changed
                         pass
                 else:
-                    # 本地没删除, remote添加的
-                    remoteadded.append(econtent)
-        for content in contents:
-            foundinremote = getitembyid(econtents, content["id"])
-            if not foundinremote:
-                remoteremoved.append(content)
-        add_all(contents, remoteadded)
-        replaceallbyid(contents, remotechanged)
-        removeallbyid(contents, remoteremoved)
-        
-        for content in contents:
-            newcontents.append(content)
-        for content in ibuf:
-            newcontents.append(content)
-        newcontents.sort(key=sort_ctime)
-    else:
-        newcontents = contents
- 
-    newcontentsstr = json.dumps(newcontents)
-    writeFile(get_path(),newcontentsstr)
-    newenotebytes = encrypt(get_key(),compress(breadFile(get_path())))
-    needpush = not operator.eq(enotebytes, newenotebytes)
-    if needpush:
-        bwriteFile(enotepath, newenotebytes)
-        print("need push")
-        os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
-    if len(newcontents) != oldlen:
-        widget.ct.refresh()
+                    # 在本地没找到, 是否本地删除
+                    dellog = read_contents(get_dellog_path())
+                    dellogitem = getitembyid(dellog, econtent["id"])
+                    if dellogitem:
+                        if not eqvalue(dellogitem, econtent):
+                            # 本地删除了, 但是remote修改过了
+                            remoteadded.append(econtent)
+                        else: 
+                            # 本地删除了
+                            pass
+                    else:
+                        # 本地没删除, remote添加的
+                        remoteadded.append(econtent)
+            for content in contents:
+                foundinremote = getitembyid(econtents, content["id"])
+                if not foundinremote:
+                    remoteremoved.append(content)
+            add_all(contents, remoteadded)
+            replaceallbyid(contents, remotechanged)
+            removeallbyid(contents, remoteremoved)
+            
+            for content in contents:
+                newcontents.append(content)
+            for content in ibuf:
+                # 防止重复添加
+                if content not in newcontents:
+                    newcontents.append(content)
+            newcontents.sort(key=sort_ctime)
+        else:
+            newcontents = contents
+    
+        newcontentsstr = json.dumps(newcontents)
+        writeFile(get_path(),newcontentsstr)
+        newenotebytes = encrypt(get_key(),compress(breadFile(get_path())))
+        needpush = not operator.eq(enotebytes, newenotebytes)
+        if needpush:
+            bwriteFile(enotepath, newenotebytes)
+            print("need push")
+            os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
+        if not operator.eq(newcontents, oldcontents):
+            widget.ct.refresh()
 
-    ibufpath = get_ibuf_path()
-    # if os.path.exists(get_dellog_path()):
-    #     os.remove(get_dellog_path())
-    if os.path.exists(ibufpath):
-        os.remove(ibufpath)
+        ibufpath = get_ibuf_path()
+        if os.path.exists(ibufpath):
+            os.remove(ibufpath)
+    finally:
+        os.remove(synclckpath)
 
 
 if __name__ == "__main__":

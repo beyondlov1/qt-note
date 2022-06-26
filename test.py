@@ -115,7 +115,10 @@ def decrypt(key, encryptData):
     return bytes                                # 返回解密数据
 
 
-print("ssssssssssss\n".strip())
+# print("ssssssssssss\n".strip())
+list1 = [{"a":"bb"}]
+d = {"a":"22"}
+print(list1.index(d))
 
 # 测试字符串的压缩与解压
 # str_zlib()
