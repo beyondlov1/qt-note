@@ -556,6 +556,11 @@ def dispatchOne(base, name, value):
     target_path = os.path.join(base, name)
     if not os.path.exists(dirname(target_path)):
         os.makedirs(dirname(target_path))
+    else:
+        # 防止重复添加
+        content = readFile(target_path)
+        if content.strip().endswith(value):
+            return;
     with open(target_path, mode="a", encoding="utf-8") as f:
         f.write("\n\n")
         f.write(value)

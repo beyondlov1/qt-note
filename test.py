@@ -9,7 +9,7 @@ import sys
 import os
 
 import zlib
-import requests
+# import requests
 
 from Cryptodome.Cipher import AES
 
@@ -114,8 +114,11 @@ def decrypt(key, encryptData):
     bytes = myCipher.decrypt(encryptData)       # 调用解密方法，得到解密后的数据
     return bytes                                # 返回解密数据
 
+
+print("ssssssssssss\n".strip())
+
 # 测试字符串的压缩与解压
-str_zlib()
+# str_zlib()
 
 # # # 测试数据流压缩
 # beginFile = "./note.list"
@@ -129,9 +132,9 @@ str_zlib()
 # file_decompress(zlibFile, endFile)
 
 
-a = pickle.dumps(json.loads(readFile("./note.list")))
-bwriteFile("./note.list.p", a)
-beginFile = "./note.list.p"
-zlibFile = "./notezp.list"
-level = 9
-file_compress(beginFile, zlibFile, level)
+# a = pickle.dumps(json.loads(readFile("./note.list")))
+# bwriteFile("./note.list.p", a)
+# beginFile = "./note.list.p"
+# zlibFile = "./notezp.list"
+# level = 9
+# file_compress(beginFile, zlibFile, level)
