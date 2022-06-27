@@ -123,7 +123,9 @@ class MyWidget(QtWidgets.QWidget):
         self.editText.ctrlenter.connect(self.write_to_list)
         self.editText.ctrln.connect(self.clear_edit_text)
         self.editText.ctrldown.connect(self.next)
+        self.editText.ctrlj.connect(self.next)
         self.editText.ctrlup.connect(self.pre)
+        self.editText.ctrlk.connect(self.pre)
         self.editText.ctrldelete.connect(self.delete_item)
         self.editText.ctrle.connect(self.show_list_item)
         self.editText.at.connect(self.focus_line_edit)
@@ -281,7 +283,9 @@ class MyTextEdit(QtWidgets.QTextEdit):
     ctrlenter = Signal(QtWidgets.QTextEdit)
     ctrln = Signal(QtWidgets.QTextEdit)
     ctrldown = Signal(QtWidgets.QTextEdit)
+    ctrlj = Signal(QtWidgets.QTextEdit)
     ctrlup = Signal(QtWidgets.QTextEdit)
+    ctrlk = Signal(QtWidgets.QTextEdit)
     ctrldelete = Signal(QtWidgets.QTextEdit)
     ctrle = Signal(QtWidgets.QTextEdit)
     at = Signal(QtWidgets.QTextEdit)
@@ -310,8 +314,12 @@ class MyTextEdit(QtWidgets.QTextEdit):
             self.ctrln.emit(self)
         if event.key() == Qt.Key_Down and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrldown.emit(self)
+        if event.key() == Qt.Key_J and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
+            self.ctrlj.emit(self)
         if event.key() == Qt.Key_Up and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrlup.emit(self)
+        if event.key() == Qt.Key_K and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
+            self.ctrlk.emit(self)
         if event.key() == Qt.Key_Delete and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
             self.ctrldelete.emit(self)
         if event.key() == Qt.Key_E and event.keyCombination().keyboardModifiers() == Qt.ControlModifier:
