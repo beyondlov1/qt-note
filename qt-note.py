@@ -629,8 +629,10 @@ def eqvalue(item1,item2):
 def getnewer(item1,item2):
     if item1["mtime"] > item2["mtime"]:
         return item1
-    else:
+    elif item1["mtime"] < item2["mtime"]:
         return item2
+    else:
+        return None
     
 
 def replaceallbyid(contents, targets):
@@ -641,8 +643,8 @@ def replaceallbyid(contents, targets):
         if found:
             replacemapping[str(i)] = found
         i=i+1
-    for (j, value) in enumerate(replacemapping):
-        contents[int(j)] = value
+    for item in replacemapping.items():
+        contents[int(item[0])] = item[1]
 
 
 def removeallbyid(contents:list, targets):
@@ -683,7 +685,7 @@ def git_sync():
                     # 本地找到了, 看看是否修改过
                     if not eqvalue(foundinlocal, econtent):
                         newer = getnewer(foundinlocal, econtent)
-                        if newer == econtent:
+                        if newer and  newer == econtent:
                             remotechanged.append(newer)
                     else:
                         # no changed
