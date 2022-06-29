@@ -668,8 +668,13 @@ def git_sync():
     try:
         os.symlink(path, synclckpath)
     except FileExistsError:
-        logger.info("git sync locked, abort.(rm %s)", synclckpath)
-        return
+        ctime = os.path.getctime(synclckpath)
+        if arrow.now().timestamp() - ctime > 60:
+            os.remove(synclckpath)
+            os.symlink(path, synclckpath)
+        else:
+            logger.info("git sync locked, abort.(rm %s)", synclckpath)
+            return
     try:
         ctuple = read_all(path)
         contents = ctuple[2]
