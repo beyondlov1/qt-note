@@ -564,7 +564,7 @@ def dispatchOne(base, name, value):
     target_path = os.path.join(base, name)
     if not os.path.exists(dirname(target_path)):
         os.makedirs(dirname(target_path))
-    else:
+    elif os.path.exists(target_path):
         # 防止重复添加
         content = readFile(target_path)
         if content.strip().endswith(value):
