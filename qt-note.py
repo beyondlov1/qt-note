@@ -20,6 +20,10 @@ import logging
 from datetime import datetime, timedelta
 from Cryptodome.Cipher import AES
 import operator                     # 导入 operator，用于比较原始数据与加解密后的数据
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
+import urllib
+
 
 
 logging.basicConfig(format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s',
@@ -104,6 +108,63 @@ def adddellogitem(item):
     writeFile(get_dellog_path(), json.dumps(dellog))
     print("dellog:"+json.dumps(dellog))
 
+def getdellogitems():
+    return read_contents(get_dellog_path())
+
+def getvaliddata():
+    path = get_path()
+    ctuple = read_all(path)
+    deleteditems = getdellogitems()
+    removeallbyidandvalue(ctuple[0],deleteditems)
+    removeallbyidandvalue(ctuple[1],deleteditems)
+    removeallbyidandvalue(ctuple[2],deleteditems)
+    return ctuple
+
+def save(id:str, value:str):
+    if not "|" in value:
+        parsed_obj = json.loads(tn.parse(value, timeBase = arrow.now()))
+        print(parsed_obj)
+        if "type" in parsed_obj and parsed_obj["type"] == "timestamp":
+            value = value+"|"+parsed_obj["timestamp"]
+        if "type" in parsed_obj and parsed_obj["type"] == "timedelta":
+            delta = parsed_obj["timedelta"]
+            arw = arrow.now().shift(years=delta["year"], months=delta["month"], days=delta["day"],
+                                    hours=delta["hour"], minutes=delta["minute"], seconds=delta["second"])
+            value = value+"|"+arw.format("YYYY-MM-DD HH:mm:ss")
+    
+    result = {}
+    path = get_path()
+    ctuple = read_all(path)
+    contents = ctuple[2]
+    ibuf = ctuple[1]
+    all = ctuple[0]
+    if id:
+        found = False
+        i = 0
+        for item in all:
+            if item["id"] == id:
+                item["value"] = value
+                item["mtime"] = arrow.now().timestamp()
+                result["index"] = i
+                result["item"] = item
+                found = True
+                break
+            i=i+1
+        if not found:
+            newitem = {"id": id, "value": value, "ctime":arrow.now().timestamp(), "mtime": arrow.now().timestamp()}
+            ibuf.append(newitem)
+            result["index"] = len(all) - 1
+            result["item"] = newitem 
+    else:
+        newitem = {"id": str(uuid.uuid4()), "value": value, "ctime":arrow.now().timestamp(), "mtime": arrow.now().timestamp()}
+        ibuf.append(newitem)
+        result["index"] = len(all) - 1
+        result["item"] = newitem
+    writeFile(path, json.dumps(contents))
+    writeFile(get_ibuf_path(), json.dumps(ibuf))
+    return result
+
+
 class MyWidget(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -174,46 +235,23 @@ class MyWidget(QtWidgets.QWidget):
     @QtCore.Slot()
     def write_to_list(self):
         value = self.editText.toPlainText()
-        if not "|" in value:
-            parsed_obj = json.loads(tn.parse(self.editText.toPlainText(), timeBase = arrow.now()))
-            print(parsed_obj)
-            if "type" in parsed_obj and parsed_obj["type"] == "timestamp":
-                value = value+"|"+parsed_obj["timestamp"]
-            if "type" in parsed_obj and parsed_obj["type"] == "timedelta":
-                delta = parsed_obj["timedelta"]
-                arw = arrow.now().shift(years=delta["year"], months=delta["month"], days=delta["day"],
-                                        hours=delta["hour"], minutes=delta["minute"], seconds=delta["second"])
-                value = value+"|"+arw.format("YYYY-MM-DD HH:mm:ss")
-            
-        next_select = 0
-        path = get_path()
-        ctuple = read_all(path)
-        contents = ctuple[2]
-        ibuf = ctuple[1]
-        all = ctuple[0]
+        id = None
         if self.editText.getData() and self.editText.getData()["id"]:
             id = self.editText.getData()["id"]
-            for content in all:
-                if content["id"] == id:
-                    content["value"] = value
-                    content["mtime"] = arrow.now().timestamp()
-                    break
-                next_select += 1
-        else:
-            ibuf.append(    
-                {"id": str(uuid.uuid4()), "value": value, "ctime":arrow.now().timestamp(), "mtime": arrow.now().timestamp()})
-            next_select = len(all) - 1
-        writeFile(path, json.dumps(contents))
-        writeFile(get_ibuf_path(), json.dumps(ibuf))
-        self.refresh_list(next_select)
+        result = save(id,value)
+        i = 0
+        for item in getvaliddata()[0]:
+            if item["id"] == result["item"]["id"]:
+                break
+            i=i+1
+        self.refresh_list(i)
         self.clear_edit_text()
 
     def refresh_list(self, select=0):
         self.list.clear()
-        path = get_path()
-        ctuple = read_all(path)
-        self.init_list(self.list, ctuple[0])
-        if ctuple[0]:
+        tuple = getvaliddata()
+        self.init_list(self.list, tuple[0])
+        if tuple[0]:
             self.list.setCurrentRow(select)
         else:
             self.focus_edit()
@@ -234,7 +272,10 @@ class MyWidget(QtWidgets.QWidget):
         if self.list.selectedItems():
             item: QtWidgets.QListWidgetItem = self.list.selectedItems()[0]
             id = item.data(Qt.ItemDataRole.UserRole)["id"]
-            contents = read_contents(get_path())
+            ctuple = read_all(get_path())
+            contents = ctuple[2]
+            ibuf = ctuple[1]
+            all = ctuple[0]
             index = -1
             for i in range(len(contents)):
                 if contents[i]["id"] == id:
@@ -245,9 +286,24 @@ class MyWidget(QtWidgets.QWidget):
                 del contents[index]
                 writeFile(get_path(), json.dumps(contents))
                 select = index
-                if index == len(contents):
-                    select = len(contents) - 1
-                self.refresh_list(select)
+            else:
+                index = -1
+                for i in range(len(ibuf)):
+                    if ibuf[i]["id"] == id:
+                        index = i
+                        break
+                if index >= 0:
+                    adddellogitem(ibuf[index])
+                    del ibuf[index]
+                    writeFile(get_ibuf_path(), json.dumps(ibuf))
+                    select = len(contents)+index -1 
+                else:
+                    select  = len(contents) - 1
+            # fixme 去除dellog中的
+            vall = getvaliddata()[0]
+            if select >= len(vall):
+                select = len(vall) - 1
+            self.refresh_list(select)
         else:
             self.editText.rander({})
 
@@ -661,6 +717,22 @@ def removeallbyid(contents:list, targets):
         if found:
             contents.remove(found)
 
+def removeallbyidandvalue(contents:list, targets):
+    for target in targets:
+        found = getitembyid(contents, target["id"])
+        if found and found['value'] == target['value']:
+            contents.remove(found)
+
+def removebyid(targets:list, id):
+    i = 0
+    for target in targets:
+        if target["id"] == id:
+            break
+        i=i+1
+    del targets[i]
+    return i
+
+
 
 def git_sync():
     path = get_path()
@@ -753,6 +825,34 @@ def git_sync():
         os.remove(synclckpath)
 
 
+class Resquest(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path == "/save":
+            s=str(self.rfile.read(int(self.headers['content-length'])),'UTF-8')#先解码     
+            print(s)
+            item = json.loads(s)
+            # print(urllib.parse.parse_qs(urllib.parse.unquote(s)))#解释参数
+            if "id" in item and "body" in item:
+                save(item["id"], item["body"])
+                widget.ct.refresh()
+            elif "body" in item:
+                save(None, item["body"])
+                widget.ct.refresh()
+            else:
+                pass
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"message":"ok"}).encode("utf-8"))
+        
+
+
+def startserver(port):
+    server = HTTPServer(('localhost', port), Resquest)
+    print("Starting server, listen at: %s" % port)
+    server.serve_forever()
+
+
 if __name__ == "__main__":
     interval_sec = 60*60
 
@@ -787,4 +887,6 @@ if __name__ == "__main__":
         git_bs.add_job(git_sync, git_trigger)
         git_bs.start()
 
+    Thread(target=startserver, args=(22901,)).start()
+    
     sys.exit(app.exec())
