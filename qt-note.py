@@ -2,6 +2,7 @@ from logging import Formatter, handlers
 from math import fabs
 from posixpath import dirname
 import sys
+from tkinter.tix import Tree
 import zlib
 
 from PySide6 import QtCore, QtWidgets, QtGui
@@ -102,23 +103,228 @@ def get_key():
     else:
         return None
 
-def adddellogitem(item):
-    dellog = read_contents(get_dellog_path())
-    dellog.append(item)
-    writeFile(get_dellog_path(), json.dumps(dellog))
-    print("dellog:"+json.dumps(dellog))
 
-def getdellogitems():
-    return read_contents(get_dellog_path())
 
 def getvaliddata():
     path = get_path()
     ctuple = read_all(path)
-    deleteditems = getdellogitems()
+    deleteditems = readdellogitems()
     removeallbyidandvalue(ctuple[0],deleteditems)
     removeallbyidandvalue(ctuple[1],deleteditems)
     removeallbyidandvalue(ctuple[2],deleteditems)
     return ctuple
+
+
+def read_contents(path):
+    if os.path.exists(path):
+        content = readFile(path)
+        if content:
+            contents = json.loads(content)
+        else:
+            contents = []
+    else:
+        contents = []
+    
+    return contents
+
+def read_ibuf(path):
+    contents = []
+    insertbufpath = get_ibuf_path()
+    if os.path.exists(insertbufpath):
+        icontent = readFile(insertbufpath)
+        if icontent:
+            insertbuf = json.loads(icontent)
+            for item in insertbuf:
+                contents.append(item)
+        else:
+            contents = []
+    return contents
+
+def adddellogitem(item):
+    dellog = read_contents(get_dellog_path())
+    removebyidandvalue(dellog, item)
+    item["mtime"] = arrow.now().timestamp()
+    dellog.append(item)
+    writeFile(get_dellog_path(), json.dumps(dellog))
+    print("dellog:"+json.dumps(dellog))
+
+def readdellogitems():
+    return read_contents(get_dellog_path())
+
+def sort_ctime(x):
+    return x["ctime"]
+
+def read_all(path):
+    contents = read_contents(path)
+    contents.sort(key=sort_ctime)
+    ibuf = read_ibuf(path)
+    ibuf.sort(key=sort_ctime)
+    all = []
+    add_all(all, contents)
+    add_all(all, ibuf)
+    all.sort(key=sort_ctime)
+    return (all, ibuf, contents)
+
+def add_all(list, toaddlist):
+    for toadd in toaddlist:
+        list.append(toadd)
+
+
+def parse_contents(contentstr):
+        if contentstr:
+            contents = json.loads(contentstr)
+        else:
+            contents = []
+        return contents
+
+def check_and_notify():
+    path = get_path()
+    ctuple = read_all(path)
+    all = ctuple[0]
+    ibuf = ctuple[1]
+    contents = ctuple[2]
+    ibufchanged = False
+    contentschanged = False
+    for content in all:
+        obj = to_obj(content["value"])
+        if "due" in obj and obj["due"].timestamp() < arrow.now().timestamp() and not obj["reminded"]:
+            emit_notify_event(obj["value"])
+            obj["reminded"] = True
+            content["value"] = to_str(obj)
+            ibufchanged = content in ibuf
+            contentschanged = content in contents
+    if contentschanged:
+        writeFile(path, json.dumps(ctuple[2]))
+    if ibufchanged:
+        writeFile(get_ibuf_path(), json.dumps(ctuple[1]))
+
+def emit_notify_event(msg:str):
+    widget.ct.send(msg)
+
+def to_obj(value:str):
+    result = {}
+    split = value.split("|")
+    result["value"] = split[0]
+    if len(split) == 2:
+        result["due"] = arrow.get(
+            split[1], "YYYY-MM-DD HH:mm:ss", tzinfo="local")
+        result["reminded"] = False
+    if len(split) == 3:
+        result["due"] = arrow.get(
+            split[1], "YYYY-MM-DD HH:mm:ss", tzinfo="local")
+        result["reminded"] = bool(split[2])
+    return result
+
+def to_str(obj):
+    return obj["value"]+"|"+obj["due"].format("YYYY-MM-DD HH:mm:ss")+"|"+str(obj["reminded"]).lower()
+
+
+
+def saferemove(list, item):
+    if item in list:
+        list.remove(item)
+
+
+def getitembyid(notelist, id):
+    i = 0
+    for noteitem in notelist:
+        if noteitem["id"] == id:
+            return (i,noteitem)
+        i = i+1
+    return None
+
+def getallitembyid(notelist, id):
+    r = []
+    i = 0
+    for noteitem in notelist:
+        if noteitem["id"] == id:
+            r.append((i,noteitem))
+        i = i+1
+    return r
+
+def getitembyidandvalue(notelist, item):
+    i = 0
+    for noteitem in notelist:
+        if noteitem["id"] == item["id"] and noteitem["value"] == item["value"]:
+            return (i,noteitem)
+        i = i+1
+    return None
+    
+def replaceallbyid(contents, targets):
+    replacemapping = {}
+    i = 0
+    for content in contents:
+        found = getitembyid(targets, content["id"])
+        if found:
+            replacemapping[str(i)] = found[1]
+        i=i+1
+    for item in replacemapping.items():
+        contents[int(item[0])] = item[1]
+
+
+def removeallbyid(contents:list, targets):
+    for target in targets:
+        found = getitembyid(contents, target["id"])
+        if found:
+            contents.remove(found[1])
+
+def removeallbyidandvalue(contents:list, targets):
+    for target in targets:
+        found = getitembyid(contents, target["id"])
+        if found and found[1]['value'] == target['value']:
+            contents.remove(found[1])
+
+def removebyidandvalue(contents:list, target):
+    found = getitembyidandvalue(contents, target)
+    if found:
+        contents.remove(found[1])
+
+def removebyid(targets:list, id):
+    i = 0
+    for target in targets:
+        if target["id"] == id:
+            break
+        i=i+1
+    del targets[i]
+    return i
+
+def removebyindex(targets:list, index):
+    del targets[index]
+
+
+def writeitems(path,items):
+    writeFile(path, json.dumps(items))
+
+
+def writecontents(items):
+    writeitems(get_path(), items)
+
+def writeibuf(items):
+    writeitems(get_ibuf_path(), items)
+
+def writedellog(items):
+    writeitems(get_dellog_path(), items)
+
+def trylock(path):
+    r = {}
+    synclckpath = path + ".lck"
+    try:
+        os.symlink(path, synclckpath)
+        r["state"] = True
+    except FileExistsError:
+        ctime = os.path.getctime(synclckpath)
+        if arrow.now().timestamp() - ctime > 60:
+            os.remove(synclckpath)
+            os.symlink(path, synclckpath)
+            r["state"] = True
+        else:
+            r["state"] = False
+            r["lockpath"] = synclckpath
+    return r
+
+def unlock(path):
+    synclckpath = path + ".lck"
+    os.remove(synclckpath)
 
 def save(id:str, value:str):
     if not "|" in value:
@@ -160,9 +366,278 @@ def save(id:str, value:str):
         ibuf.append(newitem)
         result["index"] = len(all) - 1
         result["item"] = newitem
-    writeFile(path, json.dumps(contents))
-    writeFile(get_ibuf_path(), json.dumps(ibuf))
+    writecontents(contents)
+    writeibuf(ibuf)
     return result
+
+def delete(id):
+    path = get_path()
+    lr = trylock(path)
+    if not lr["state"]:
+        return None
+    r = {}
+    ctuple = read_all(path)
+    contents = ctuple[2]
+    ibuf = ctuple[1]
+    all = ctuple[0]
+    foundc = getitembyid(contents, id)
+    if foundc:
+        adddellogitem(foundc[1])
+        r["item"] = foundc[1]
+        del contents[foundc[0]]
+        writecontents(contents)
+        r["index"] = foundc[0]
+    else:
+        foundi = getitembyid(ibuf, id)
+        if foundi:
+            adddellogitem(foundi[1])
+            r["item"] = foundi[1]
+            del ibuf[foundi[0]]
+            writeibuf(ibuf)
+            r["index"] = len(contents)+foundi[0] 
+        else:
+            r["index"]  = len(contents) - 1
+    unlock(path)
+    return r
+    
+
+def dispatch():
+    git_sync()
+    ctuple = read_all(get_path())
+    contents = ctuple[2]
+    ibuf = ctuple[1]
+    changed = False
+    for content in ctuple[0]:
+        if "delete_stage" in content:
+            if content["delete_stage"] == 1:
+                dispatchOne(get_dispatch_base(),
+                            content["tag"], content["value_without_tag"])
+                content["delete_stage"] = 2
+                adddellogitem(content)
+                saferemove(contents,content)
+                saferemove(ibuf, content)
+                changed = True
+            if content["delete_stage"] == 2:
+                adddellogitem(content)
+                saferemove(contents,content)
+                saferemove(ibuf, content)
+                changed = True
+    for content in ctuple[0]:
+        value = content["value"]
+        if "@" in value:
+            tag_start_index = value.index("@")
+            space_index = value.find(" ", tag_start_index)
+            newline_index = value.find("\n", tag_start_index)
+            if newline_index == -1:
+                newline_index = sys.maxsize
+            if space_index == -1:
+                space_index = sys.maxsize
+            tag_end_index = min(space_index, newline_index)
+            tag = value[tag_start_index+1:tag_end_index]
+            if tag and ("due" not in content or not content["due"]):
+                if arrow.now().timestamp() - content["ctime"] < interval_sec:
+                    continue
+                content["delete_stage"] = 1
+                content["tag"] = tag
+                content["value_without_tag"] = value[:tag_start_index]
+                dispatchOne(get_dispatch_base(), tag, value[:tag_start_index])
+                content["delete_stage"] = 2
+                adddellogitem(content)
+                saferemove(contents,content)
+                saferemove(ibuf, content)
+                changed = True
+    if changed:
+        logger.info("dispatch save start")
+        writeFile(get_path(), json.dumps(contents))
+        writeFile(get_ibuf_path(), json.dumps(ibuf))
+        widget.ct.refresh()
+        git_sync()
+        logger.info("dispatch save end")
+
+
+def dispatchOne(base, name, value):
+    if not name.endswith(".md"):
+        name = name + ".md"
+    target_path = os.path.join(base, name)
+    if not os.path.exists(dirname(target_path)):
+        os.makedirs(dirname(target_path))
+    elif os.path.exists(target_path):
+        # 防止重复添加
+        content = readFile(target_path)
+        if content.strip().endswith(value):
+            return
+    with open(target_path, mode="a", encoding="utf-8") as f:
+        f.write("\n\n")
+        f.write(value)
+        f.write("\n")
+
+
+def list_name_items(dirpath):
+    file_items = []
+    names = os.listdir(dirpath)
+    for filename in names:
+        path = os.path.join(dirpath, filename)
+        if os.path.isfile(path):
+            file_items.append({"name": filename, "path": path})
+        if os.path.isdir(path):
+            continue
+    return file_items
+
+
+AES_BLOCK_SIZE = AES.block_size     # AES 加密数据块大小, 只能是16
+AES_KEY_SIZE = 16
+
+# 待加密文本补齐到 block size 的整数倍
+def padContent(bytes):
+    while len(bytes) % AES_BLOCK_SIZE != 0:     # 循环直到补齐 AES_BLOCK_SIZE 的倍数
+        bytes += ' '.encode()                   # 通过补空格（不影响源文件的可读）来补齐
+    return bytes                                # 返回补齐后的字节列表
+
+# 待加密的密钥补齐到对应的位数
+def padKey(key):
+    if len(key) > AES_KEY_SIZE:                 # 如果密钥长度超过 AES_KEY_SIZE
+        return key[:AES_KEY_SIZE]               # 截取前面部分作为密钥并返回
+    while len(key) % AES_KEY_SIZE != 0:         # 不到 AES_KEY_SIZE 长度则补齐
+        key += ' '.encode()                     # 补齐的字符可用任意字符代替
+    return key                                  # 返回补齐后的密钥
+
+# AES 加密
+def encrypt(key, bytes):
+    # 新建一个 AES 算法实例，使用 ECB（电子密码本）模式
+    myCipher = AES.new(padKey(key), AES.MODE_ECB)
+    encryptData = myCipher.encrypt(padContent(bytes))       # 调用加密方法，得到加密后的数据
+    return encryptData                          # 返回加密数据
+
+# AES 解密
+def decrypt(key, encryptData):
+    # 新建一个 AES 算法实例，使用 ECB（电子密码本）模式
+    myCipher = AES.new(padKey(key), AES.MODE_ECB)
+    bytes = myCipher.decrypt(encryptData)       # 调用解密方法，得到解密后的数据
+    return bytes                                # 返回解密数据
+
+
+def compress(bytes_message):
+    compressed = zlib.compress(bytes_message, zlib.Z_BEST_COMPRESSION)
+    return compressed
+
+def decompress(compressed):
+    return zlib.decompress(compressed)
+
+def eqvalue(item1,item2):
+    return item1["value"] == item2["value"]
+
+def getnewer(item1,item2):
+    if item1["mtime"] > item2["mtime"]:
+        return item1
+    elif item1["mtime"] < item2["mtime"]:
+        return item2
+    else:
+        return None
+    
+
+
+def git_sync():
+    path = get_path()
+    r = trylock(path)
+    if not r["state"]:
+        logger.info("git sync locked, abort.(rm %s)", r["lockpath"])
+        return
+    try:
+        ctuple = read_all(path)
+        contents = ctuple[2]
+        ibuf = ctuple[1]
+        oldlenc = len(contents)
+        oldleni = len(ibuf)
+
+        # 防止文件中还含有dellog
+        dellogitems = readdellogitems()
+        removeallbyidandvalue(contents, dellogitems)
+        removeallbyidandvalue(ibuf, dellogitems)
+        fixed = False
+        if len(contents) != oldlenc:
+            writecontents(contents)
+            fixed = True
+        if len(ibuf) != oldleni:
+            writeibuf(ibuf)
+            fixed = True
+        if fixed:
+            ctuple = read_all(path)
+            contents = ctuple[2]
+            ibuf = ctuple[1]
+
+        oldcontents = ctuple[0][:]
+        os.system("cd "+get_git_dir()+"&& git pull")
+        enotepath = os.path.join(get_git_dir(), "note.list.ze")
+        enotebytes = b''
+        newcontents = []
+        if os.path.exists(enotepath):
+            enotebytes = breadFile(enotepath)
+            econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
+            print(json.dumps(econtents))
+            remoteadded = []
+            remoteremoved = []
+            remotechanged = []
+            for econtent in econtents:
+                foundinlocal = getitembyid(contents, econtent["id"])
+                if foundinlocal:
+                    # 本地找到了, 看看是否修改过
+                    if not eqvalue(foundinlocal[1], econtent):
+                        newer = getnewer(foundinlocal[1], econtent)
+                        if newer and  newer == econtent:
+                            remotechanged.append(newer)
+                    else:
+                        # no changed
+                        pass
+                else:
+                    # 在本地没找到, 是否本地删除
+                    dellog = readdellogitems()
+                    dellogitem = getitembyidandvalue(dellog, econtent)
+                    if not dellogitem:
+                        # 本地没删除, remote添加的, 或者远程把值改了
+                        remoteadded.append(econtent)
+                    else:
+                        # 本地删除了, remote没删除, 值相同, 需要判断删除时间和remote修改时间大小
+                        if dellogitem[1]["mtime"] >= econtent["mtime"]:
+                            # 后删除的
+                            remoteremoved.append(econtent)
+                        else:
+                            # 远程又将其恢复了
+                            remoteadded.append(econtent)
+            for content in contents:
+                foundinremote = getitembyid(econtents, content["id"])
+                if not foundinremote:
+                    remoteremoved.append(content)
+            add_all(contents, remoteadded)
+            replaceallbyid(contents, remotechanged)
+            removeallbyid(contents, remoteremoved)
+            
+            for content in contents:
+                newcontents.append(content)
+            for content in ibuf:
+                # 防止重复添加
+                if content not in newcontents:
+                    newcontents.append(content)
+            newcontents.sort(key=sort_ctime)
+        else:
+            newcontents = contents
+    
+        newcontentsstr = json.dumps(newcontents)
+        writeFile(get_path(),newcontentsstr)
+        newenotebytes = encrypt(get_key(),compress(breadFile(get_path())))
+        needpush = not operator.eq(enotebytes, newenotebytes)
+        if needpush:
+            bwriteFile(enotepath, newenotebytes)
+            print("need push")
+            os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
+        if not operator.eq(newcontents, oldcontents):
+            widget.ct.refresh()
+
+        ibufpath = get_ibuf_path()
+        if os.path.exists(ibufpath):
+            os.remove(ibufpath)
+    finally:
+        unlock(path)
+
 
 
 class MyWidget(QtWidgets.QWidget):
@@ -272,34 +747,10 @@ class MyWidget(QtWidgets.QWidget):
         if self.list.selectedItems():
             item: QtWidgets.QListWidgetItem = self.list.selectedItems()[0]
             id = item.data(Qt.ItemDataRole.UserRole)["id"]
-            ctuple = read_all(get_path())
-            contents = ctuple[2]
-            ibuf = ctuple[1]
-            all = ctuple[0]
-            index = -1
-            for i in range(len(contents)):
-                if contents[i]["id"] == id:
-                    index = i
-                    break
-            if index >= 0:
-                adddellogitem(contents[index])
-                del contents[index]
-                writeFile(get_path(), json.dumps(contents))
-                select = index
-            else:
-                index = -1
-                for i in range(len(ibuf)):
-                    if ibuf[i]["id"] == id:
-                        index = i
-                        break
-                if index >= 0:
-                    adddellogitem(ibuf[index])
-                    del ibuf[index]
-                    writeFile(get_ibuf_path(), json.dumps(ibuf))
-                    select = len(contents)+index -1 
-                else:
-                    select  = len(contents) - 1
-            # fixme 去除dellog中的
+            dr = delete(id)
+            select = dr["index"] - 1
+            if select < 0:
+                select  = 0
             vall = getvaliddata()[0]
             if select >= len(vall):
                 select = len(vall) - 1
@@ -429,99 +880,6 @@ class MyListItemWidget(QtWidgets.QWidget):
         self.setLayout(self.box)
 
 
-def read_contents(path):
-    if os.path.exists(path):
-        content = readFile(path)
-        if content:
-            contents = json.loads(content)
-        else:
-            contents = []
-    else:
-        contents = []
-    
-    return contents
-
-def read_ibuf(path):
-    contents = []
-    insertbufpath = get_ibuf_path()
-    if os.path.exists(insertbufpath):
-        icontent = readFile(insertbufpath)
-        if icontent:
-            insertbuf = json.loads(icontent)
-            for item in insertbuf:
-                contents.append(item)
-        else:
-            contents = []
-    return contents
-
-def sort_ctime(x):
-    return x["ctime"]
-
-def read_all(path):
-    contents = read_contents(path)
-    contents.sort(key=sort_ctime)
-    ibuf = read_ibuf(path)
-    ibuf.sort(key=sort_ctime)
-    all = []
-    add_all(all, contents)
-    add_all(all, ibuf)
-    all.sort(key=sort_ctime)
-    return (all, ibuf, contents)
-
-def add_all(list, toaddlist):
-    for toadd in toaddlist:
-        list.append(toadd)
-
-
-def parse_contents(contentstr):
-        if contentstr:
-            contents = json.loads(contentstr)
-        else:
-            contents = []
-        return contents
-
-def check_and_notify():
-    path = get_path()
-    ctuple = read_all(path)
-    all = ctuple[0]
-    ibuf = ctuple[1]
-    contents = ctuple[2]
-    ibufchanged = False
-    contentschanged = False
-    for content in all:
-        obj = to_obj(content["value"])
-        if "due" in obj and obj["due"].timestamp() < arrow.now().timestamp() and not obj["reminded"]:
-            emit_notify_event(obj["value"])
-            obj["reminded"] = True
-            content["value"] = to_str(obj)
-            ibufchanged = content in ibuf
-            contentschanged = content in contents
-    if contentschanged:
-        writeFile(path, json.dumps(ctuple[2]))
-    if ibufchanged:
-        writeFile(get_ibuf_path(), json.dumps(ctuple[1]))
-
-def emit_notify_event(msg:str):
-    widget.ct.send(msg)
-
-def to_obj(value:str):
-    result = {}
-    split = value.split("|")
-    result["value"] = split[0]
-    if len(split) == 2:
-        result["due"] = arrow.get(
-            split[1], "YYYY-MM-DD HH:mm:ss", tzinfo="local")
-        result["reminded"] = False
-    if len(split) == 3:
-        result["due"] = arrow.get(
-            split[1], "YYYY-MM-DD HH:mm:ss", tzinfo="local")
-        result["reminded"] = bool(split[2])
-    return result
-
-def to_str(obj):
-    return obj["value"]+"|"+obj["due"].format("YYYY-MM-DD HH:mm:ss")+"|"+str(obj["reminded"]).lower()
-
-
 class CustomDialog(QtWidgets.QDialog):
     def __init__(self, msg,parent=None):
         super().__init__(parent)
@@ -556,274 +914,6 @@ class Notifier(QtCore.QObject):
         self.refreshed.emit()
 
 
-def saferemove(list, item):
-    if item in list:
-        list.remove(item)
-
-def dispatch():
-    git_sync()
-    ctuple = read_all(get_path())
-    contents = ctuple[2]
-    ibuf = ctuple[1]
-    changed = False
-    for content in ctuple[0]:
-        if "delete_stage" in content:
-            if content["delete_stage"] == 1:
-                dispatchOne(get_dispatch_base(),
-                            content["tag"], content["value_without_tag"])
-                content["delete_stage"] = 2
-                adddellogitem(content)
-                saferemove(contents,content)
-                saferemove(ibuf, content)
-                changed = True
-            if content["delete_stage"] == 2:
-                adddellogitem(content)
-                saferemove(contents,content)
-                saferemove(ibuf, content)
-                changed = True
-    for content in ctuple[0]:
-        value = content["value"]
-        if "@" in value:
-            tag_start_index = value.index("@")
-            space_index = value.find(" ", tag_start_index)
-            newline_index = value.find("\n", tag_start_index)
-            if newline_index == -1:
-                newline_index = sys.maxsize
-            if space_index == -1:
-                space_index = sys.maxsize
-            tag_end_index = min(space_index, newline_index)
-            tag = value[tag_start_index+1:tag_end_index]
-            if tag and ("due" not in content or not content["due"]):
-                if arrow.now().timestamp() - content["ctime"] < interval_sec:
-                    continue
-                content["delete_stage"] = 1
-                content["tag"] = tag
-                content["value_without_tag"] = value[:tag_start_index]
-                dispatchOne(get_dispatch_base(), tag, value[:tag_start_index])
-                content["delete_stage"] = 2
-                adddellogitem(content)
-                saferemove(contents,content)
-                saferemove(ibuf, content)
-                changed = True
-    if changed:
-        logger.info("dispatch save start")
-        writeFile(get_path(), json.dumps(contents))
-        writeFile(get_ibuf_path(), json.dumps(ibuf))
-        widget.ct.refresh()
-        git_sync()
-        logger.info("dispatch save end")
-
-
-def dispatchOne(base, name, value):
-    if not name.endswith(".md"):
-        name = name + ".md"
-    target_path = os.path.join(base, name)
-    if not os.path.exists(dirname(target_path)):
-        os.makedirs(dirname(target_path))
-    elif os.path.exists(target_path):
-        # 防止重复添加
-        content = readFile(target_path)
-        if content.strip().endswith(value):
-            return
-    with open(target_path, mode="a", encoding="utf-8") as f:
-        f.write("\n\n")
-        f.write(value)
-        f.write("\n")
-
-
-def list_name_items(dirpath):
-    file_items = []
-    names = os.listdir(dirpath)
-    for filename in names:
-        path = os.path.join(dirpath, filename)
-        if os.path.isfile(path):
-            file_items.append({"name": filename, "path": path})
-        if os.path.isdir(path):
-            continue
-    return file_items
-
-
-AES_BLOCK_SIZE = AES.block_size     # AES 加密数据块大小, 只能是16
-AES_KEY_SIZE = 16
-
-# 待加密文本补齐到 block size 的整数倍
-def padContent(bytes):
-    while len(bytes) % AES_BLOCK_SIZE != 0:     # 循环直到补齐 AES_BLOCK_SIZE 的倍数
-        bytes += ' '.encode()                   # 通过补空格（不影响源文件的可读）来补齐
-    return bytes                                # 返回补齐后的字节列表
-
-# 待加密的密钥补齐到对应的位数
-def padKey(key):
-    if len(key) > AES_KEY_SIZE:                 # 如果密钥长度超过 AES_KEY_SIZE
-        return key[:AES_KEY_SIZE]               # 截取前面部分作为密钥并返回
-    while len(key) % AES_KEY_SIZE != 0:         # 不到 AES_KEY_SIZE 长度则补齐
-        key += ' '.encode()                     # 补齐的字符可用任意字符代替
-    return key                                  # 返回补齐后的密钥
-
-# AES 加密
-def encrypt(key, bytes):
-    # 新建一个 AES 算法实例，使用 ECB（电子密码本）模式
-    myCipher = AES.new(padKey(key), AES.MODE_ECB)
-    encryptData = myCipher.encrypt(padContent(bytes))       # 调用加密方法，得到加密后的数据
-    return encryptData                          # 返回加密数据
-
-# AES 解密
-def decrypt(key, encryptData):
-    # 新建一个 AES 算法实例，使用 ECB（电子密码本）模式
-    myCipher = AES.new(padKey(key), AES.MODE_ECB)
-    bytes = myCipher.decrypt(encryptData)       # 调用解密方法，得到解密后的数据
-    return bytes                                # 返回解密数据
-
-def getitembyid(notelist, id):
-    for noteitem in notelist:
-        if noteitem["id"] == id:
-            return noteitem
-    return None
-
-def compress(bytes_message):
-    compressed = zlib.compress(bytes_message, zlib.Z_BEST_COMPRESSION)
-    return compressed
-
-def decompress(compressed):
-    return zlib.decompress(compressed)
-
-def eqvalue(item1,item2):
-    return item1["value"] == item2["value"]
-
-def getnewer(item1,item2):
-    if item1["mtime"] > item2["mtime"]:
-        return item1
-    elif item1["mtime"] < item2["mtime"]:
-        return item2
-    else:
-        return None
-    
-
-def replaceallbyid(contents, targets):
-    replacemapping = {}
-    i = 0
-    for content in contents:
-        found = getitembyid(targets, content["id"])
-        if found:
-            replacemapping[str(i)] = found
-        i=i+1
-    for item in replacemapping.items():
-        contents[int(item[0])] = item[1]
-
-
-def removeallbyid(contents:list, targets):
-    for target in targets:
-        found = getitembyid(contents, target["id"])
-        if found:
-            contents.remove(found)
-
-def removeallbyidandvalue(contents:list, targets):
-    for target in targets:
-        found = getitembyid(contents, target["id"])
-        if found and found['value'] == target['value']:
-            contents.remove(found)
-
-def removebyid(targets:list, id):
-    i = 0
-    for target in targets:
-        if target["id"] == id:
-            break
-        i=i+1
-    del targets[i]
-    return i
-
-
-
-def git_sync():
-    path = get_path()
-    synclckpath = path + ".lck"
-    try:
-        os.symlink(path, synclckpath)
-    except FileExistsError:
-        ctime = os.path.getctime(synclckpath)
-        if arrow.now().timestamp() - ctime > 60:
-            os.remove(synclckpath)
-            os.symlink(path, synclckpath)
-        else:
-            logger.info("git sync locked, abort.(rm %s)", synclckpath)
-            return
-    try:
-        ctuple = read_all(path)
-        contents = ctuple[2]
-        ibuf = ctuple[1]
-        oldlen = len(contents)
-        oldcontents = ctuple[0][:]
-        os.system("cd "+get_git_dir()+"&& git pull")
-        enotepath = os.path.join(get_git_dir(), "note.list.ze")
-        enotebytes = b''
-        newcontents = []
-        if os.path.exists(enotepath):
-            enotebytes = breadFile(enotepath)
-            econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
-            print(json.dumps(econtents))
-            remoteadded = []
-            remoteremoved = []
-            remotechanged = []
-            for econtent in econtents:
-                foundinlocal = getitembyid(contents, econtent["id"])
-                if foundinlocal:
-                    # 本地找到了, 看看是否修改过
-                    if not eqvalue(foundinlocal, econtent):
-                        newer = getnewer(foundinlocal, econtent)
-                        if newer and  newer == econtent:
-                            remotechanged.append(newer)
-                    else:
-                        # no changed
-                        pass
-                else:
-                    # 在本地没找到, 是否本地删除
-                    dellog = read_contents(get_dellog_path())
-                    dellogitem = getitembyid(dellog, econtent["id"])
-                    if dellogitem:
-                        if not eqvalue(dellogitem, econtent):
-                            # 本地删除了, 但是remote修改过了
-                            remoteadded.append(econtent)
-                        else: 
-                            # 本地删除了
-                            pass
-                    else:
-                        # 本地没删除, remote添加的
-                        remoteadded.append(econtent)
-            for content in contents:
-                foundinremote = getitembyid(econtents, content["id"])
-                if not foundinremote:
-                    remoteremoved.append(content)
-            add_all(contents, remoteadded)
-            replaceallbyid(contents, remotechanged)
-            removeallbyid(contents, remoteremoved)
-            
-            for content in contents:
-                newcontents.append(content)
-            for content in ibuf:
-                # 防止重复添加
-                if content not in newcontents:
-                    newcontents.append(content)
-            newcontents.sort(key=sort_ctime)
-        else:
-            newcontents = contents
-    
-        newcontentsstr = json.dumps(newcontents)
-        writeFile(get_path(),newcontentsstr)
-        newenotebytes = encrypt(get_key(),compress(breadFile(get_path())))
-        needpush = not operator.eq(enotebytes, newenotebytes)
-        if needpush:
-            bwriteFile(enotepath, newenotebytes)
-            print("need push")
-            os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
-        if not operator.eq(newcontents, oldcontents):
-            widget.ct.refresh()
-
-        ibufpath = get_ibuf_path()
-        if os.path.exists(ibufpath):
-            os.remove(ibufpath)
-    finally:
-        os.remove(synclckpath)
-
 
 class Resquest(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -846,10 +936,8 @@ class Resquest(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"message":"ok"}).encode("utf-8"))
         
 
-
-def startserver(port):
-    server = HTTPServer(('localhost', port), Resquest)
-    print("Starting server, listen at: %s" % port)
+server = None
+def startserver():
     server.serve_forever()
 
 
@@ -873,20 +961,29 @@ if __name__ == "__main__":
     bs.add_job(check_and_notify, trigger)
     bs.start()
 
+    dispatch_bs = BackgroundScheduler()
     if get_dispatch_base():    
-        dispatch_bs = BackgroundScheduler()
         dispatch_trigger = IntervalTrigger(
             seconds=interval_sec, start_date=datetime.now()+timedelta(seconds=30))
         dispatch_bs.add_job(dispatch, dispatch_trigger)
         dispatch_bs.start()
     
+    git_bs = BackgroundScheduler()
     if get_git_dir():
-        git_bs = BackgroundScheduler()
         git_trigger = IntervalTrigger(
             seconds=30, start_date=datetime.now()+timedelta(seconds=5))
         git_bs.add_job(git_sync, git_trigger)
         git_bs.start()
 
-    Thread(target=startserver, args=(22901,)).start()
-    
-    sys.exit(app.exec())
+    port = 22901
+    server = HTTPServer(('localhost', port), Resquest)
+    print("Starting server, listen at: %s" % port)
+    serverthread = Thread(target=startserver)
+    serverthread.start()
+    exitcode = app.exec()
+    if server: server.shutdown()
+    if bs: bs.shutdown()
+    if dispatch_bs: dispatch_bs.shutdown()
+    if git_bs: git_bs.shutdown()
+    serverthread.join()
+    sys.exit(exitcode)
