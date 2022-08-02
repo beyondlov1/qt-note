@@ -139,7 +139,6 @@ def adddellogitem(item):
     item["mtime"] = arrow.now().timestamp()
     dellog.append(item)
     writeFile(get_dellog_path(), json.dumps(dellog))
-    print("dellog:"+json.dumps(dellog))
 
 def read_dellog():
     return readlist(get_dellog_path())
