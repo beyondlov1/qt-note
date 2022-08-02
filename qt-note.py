@@ -23,7 +23,7 @@ from Cryptodome.Cipher import AES
 import operator                     # 导入 operator，用于比较原始数据与加解密后的数据
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
-import urllib
+import time
 
 
 
@@ -107,15 +107,15 @@ def get_key():
 
 def getvaliddata():
     path = get_path()
-    ctuple = read_all(path)
-    deleteditems = readdellogitems()
+    ctuple = read_all()
+    deleteditems = read_dellog()
     removeallbyidandvalue(ctuple[0],deleteditems)
     removeallbyidandvalue(ctuple[1],deleteditems)
     removeallbyidandvalue(ctuple[2],deleteditems)
     return ctuple
 
 
-def read_contents(path):
+def readlist(path):
     if os.path.exists(path):
         content = readFile(path)
         if content:
@@ -127,37 +127,42 @@ def read_contents(path):
     
     return contents
 
-def read_ibuf(path):
-    contents = []
-    insertbufpath = get_ibuf_path()
-    if os.path.exists(insertbufpath):
-        icontent = readFile(insertbufpath)
-        if icontent:
-            insertbuf = json.loads(icontent)
-            for item in insertbuf:
-                contents.append(item)
-        else:
-            contents = []
-    return contents
+def read_ibuf():
+    return readlist(get_ibuf_path())
+
+def read_contents():
+    return readlist(get_path())
 
 def adddellogitem(item):
-    dellog = read_contents(get_dellog_path())
+    dellog = read_dellog()
     removebyidandvalue(dellog, item)
     item["mtime"] = arrow.now().timestamp()
     dellog.append(item)
     writeFile(get_dellog_path(), json.dumps(dellog))
     print("dellog:"+json.dumps(dellog))
 
-def readdellogitems():
-    return read_contents(get_dellog_path())
+def read_dellog():
+    return readlist(get_dellog_path())
+
+def read_ibuf_shadow():
+    return readlist(get_ibuf_shadow_path())
+
+def deleteibufshadow():
+    os.path.exists(get_ibuf_shadow_path())
+
+def writeibufshadow(ibufshadow):
+    writeitems(get_ibuf_shadow_path(), ibufshadow )
+
+def get_ibuf_shadow_path():
+    return get_ibuf_path()+".shadow"
 
 def sort_ctime(x):
     return x["ctime"]
 
-def read_all(path):
-    contents = read_contents(path)
+def read_all():
+    contents = readlist(get_path())
     contents.sort(key=sort_ctime)
-    ibuf = read_ibuf(path)
+    ibuf = read_ibuf()
     ibuf.sort(key=sort_ctime)
     all = []
     add_all(all, contents)
@@ -179,7 +184,7 @@ def parse_contents(contentstr):
 
 def check_and_notify():
     path = get_path()
-    ctuple = read_all(path)
+    ctuple = read_all()
     all = ctuple[0]
     ibuf = ctuple[1]
     contents = ctuple[2]
@@ -326,7 +331,10 @@ def unlock(path):
     synclckpath = path + ".lck"
     os.remove(synclckpath)
 
-def save(id:str, value:str):
+def save(id:str, value:str, mtime = arrow.now().timestamp()):
+    while(not trylock(get_ibuf_path())["state"]):
+        time.sleep(0.1)
+    
     if not "|" in value:
         parsed_obj = json.loads(tn.parse(value, timeBase = arrow.now()))
         print(parsed_obj)
@@ -339,71 +347,40 @@ def save(id:str, value:str):
             value = value+"|"+arw.format("YYYY-MM-DD HH:mm:ss")
     
     result = {}
-    path = get_path()
-    ctuple = read_all(path)
-    contents = ctuple[2]
+    ctuple = read_all()
     ibuf = ctuple[1]
-    all = ctuple[0]
     if id:
-        found = False
-        i = 0
-        for item in all:
-            if item["id"] == id:
-                item["value"] = value
-                item["mtime"] = arrow.now().timestamp()
-                result["index"] = i
-                result["item"] = item
-                found = True
-                break
-            i=i+1
-        if not found:
-            newitem = {"id": id, "value": value, "ctime":arrow.now().timestamp(), "mtime": arrow.now().timestamp()}
+        foundinibuf = getitembyid(ibuf, id)
+        if foundinibuf:
+            foundinibuf[1]["value"] = value
+            foundinibuf[1]["mtime"] = mtime
+            result = foundinibuf[1]
+        else:
+            newitem = {"id": id, "value": value, "ctime":mtime, "mtime": mtime}
             ibuf.append(newitem)
-            result["index"] = len(all) - 1
-            result["item"] = newitem 
+            result = newitem 
     else:
-        newitem = {"id": str(uuid.uuid4()), "value": value, "ctime":arrow.now().timestamp(), "mtime": arrow.now().timestamp()}
+        newitem = {"id": str(uuid.uuid4()), "value": value, "ctime":mtime, "mtime": mtime}
         ibuf.append(newitem)
-        result["index"] = len(all) - 1
-        result["item"] = newitem
-    writecontents(contents)
+        result = newitem
     writeibuf(ibuf)
+    unlock(get_ibuf_path())
     return result
 
 def delete(id):
-    path = get_path()
-    lr = trylock(path)
-    if not lr["state"]:
-        return None
-    r = {}
-    ctuple = read_all(path)
-    contents = ctuple[2]
-    ibuf = ctuple[1]
+    r = None
+    ctuple = read_all()
     all = ctuple[0]
-    foundc = getitembyid(contents, id)
-    if foundc:
-        adddellogitem(foundc[1])
-        r["item"] = foundc[1]
-        del contents[foundc[0]]
-        writecontents(contents)
-        r["index"] = foundc[0]
-    else:
-        foundi = getitembyid(ibuf, id)
-        if foundi:
-            adddellogitem(foundi[1])
-            r["item"] = foundi[1]
-            del ibuf[foundi[0]]
-            writeibuf(ibuf)
-            r["index"] = len(contents)+foundi[0] 
-        else:
-            r["index"]  = len(contents) - 1
-    unlock(path)
+    found = getitembyid(all, id)
+    if found and not getitembyidandvalue(read_dellog(),found[1]):
+        adddellogitem(found[1])
+        r = found[1]
     return r
     
 
 def dispatch():
     git_sync()
-    ctuple = read_all(get_path())
+    ctuple = read_all()
     contents = ctuple[2]
     ibuf = ctuple[1]
     changed = False
@@ -413,14 +390,10 @@ def dispatch():
                 dispatchOne(get_dispatch_base(),
                             content["tag"], content["value_without_tag"])
                 content["delete_stage"] = 2
-                adddellogitem(content)
-                saferemove(contents,content)
-                saferemove(ibuf, content)
+                delete(content["id"])
                 changed = True
             if content["delete_stage"] == 2:
-                adddellogitem(content)
-                saferemove(contents,content)
-                saferemove(ibuf, content)
+                delete(content["id"])
                 changed = True
     for content in ctuple[0]:
         value = content["value"]
@@ -442,14 +415,10 @@ def dispatch():
                 content["value_without_tag"] = value[:tag_start_index]
                 dispatchOne(get_dispatch_base(), tag, value[:tag_start_index])
                 content["delete_stage"] = 2
-                adddellogitem(content)
-                saferemove(contents,content)
-                saferemove(ibuf, content)
+                delete(content["id"])
                 changed = True
     if changed:
         logger.info("dispatch save start")
-        writeFile(get_path(), json.dumps(contents))
-        writeFile(get_ibuf_path(), json.dumps(ibuf))
         widget.ct.refresh()
         git_sync()
         logger.info("dispatch save end")
@@ -537,33 +506,31 @@ def getnewer(item1,item2):
 
 
 def git_sync():
+    # 只同步 note.list 文件
     path = get_path()
     r = trylock(path)
     if not r["state"]:
         logger.info("git sync locked, abort.(rm %s)", r["lockpath"])
         return
-    try:
-        ctuple = read_all(path)
+    try: 
+        ctuple = read_all()
         contents = ctuple[2]
-        ibuf = ctuple[1]
         oldlenc = len(contents)
-        oldleni = len(ibuf)
 
         # 防止文件中还含有dellog
-        dellogitems = readdellogitems()
+        dellogitems = read_dellog()
         removeallbyidandvalue(contents, dellogitems)
-        removeallbyidandvalue(ibuf, dellogitems)
         fixed = False
         if len(contents) != oldlenc:
             writecontents(contents)
             fixed = True
-        if len(ibuf) != oldleni:
-            writeibuf(ibuf)
-            fixed = True
         if fixed:
-            ctuple = read_all(path)
+            ctuple = read_all()
             contents = ctuple[2]
-            ibuf = ctuple[1]
+
+        ibufshadow = read_ibuf_shadow()
+
+        print("local:"+ json.dumps(contents))
 
         oldcontents = ctuple[0][:]
         os.system("cd "+get_git_dir()+"&& git pull")
@@ -573,7 +540,7 @@ def git_sync():
         if os.path.exists(enotepath):
             enotebytes = breadFile(enotepath)
             econtents = parse_contents(decompress(decrypt(get_key(), enotebytes)).decode("utf-8"))
-            print(json.dumps(econtents))
+            print("remote:"+json.dumps(econtents))
             remoteadded = []
             remoteremoved = []
             remotechanged = []
@@ -590,7 +557,7 @@ def git_sync():
                         pass
                 else:
                     # 在本地没找到, 是否本地删除
-                    dellog = readdellogitems()
+                    dellog = read_dellog()
                     dellogitem = getitembyidandvalue(dellog, econtent)
                     if not dellogitem:
                         # 本地没删除, remote添加的, 或者远程把值改了
@@ -606,23 +573,21 @@ def git_sync():
             for content in contents:
                 foundinremote = getitembyid(econtents, content["id"])
                 if not foundinremote:
-                    remoteremoved.append(content)
+                    if not getitembyid(ibufshadow, content["id"]):
+                        remoteremoved.append(content)
             add_all(contents, remoteadded)
             replaceallbyid(contents, remotechanged)
             removeallbyid(contents, remoteremoved)
             
             for content in contents:
                 newcontents.append(content)
-            for content in ibuf:
-                # 防止重复添加
-                if content not in newcontents:
-                    newcontents.append(content)
             newcontents.sort(key=sort_ctime)
         else:
             newcontents = contents
     
         newcontentsstr = json.dumps(newcontents)
         writeFile(get_path(),newcontentsstr)
+        deleteibufshadow()
         newenotebytes = encrypt(get_key(),compress(breadFile(get_path())))
         needpush = not operator.eq(enotebytes, newenotebytes)
         if needpush:
@@ -631,12 +596,47 @@ def git_sync():
             os.system("cd "+get_git_dir()+"&& git add . && git commit -m auto && git push")
         if not operator.eq(newcontents, oldcontents):
             widget.ct.refresh()
-
-        ibufpath = get_ibuf_path()
-        if os.path.exists(ibufpath):
-            os.remove(ibufpath)
     finally:
         unlock(path)
+
+
+    # 将 ibuf 合并到 contents
+    ibufpath = get_ibuf_path()
+    r = trylock(get_ibuf_path())
+    if not r["state"]:
+        logger.info("git sync locked, abort.(rm %s)", r["lockpath"])
+        return
+    try:
+        ibuf = read_ibuf()
+        dellogitems = read_dellog()
+        removeallbyidandvalue(ibuf, dellogitems)
+        fixed = False
+        if len(ibuf) != oldlenc:
+            writeibuf(ibuf)
+            fixed = True
+        if fixed:
+            ibuf = read_ibuf()
+
+        writeibufshadow(ibuf)
+
+        refresh = False
+        contents = read_contents()
+        for item in ibuf:
+            found = getitembyid(contents, item["id"])
+            if found:
+                if found[1]["mtime"] < item["mtime"]:
+                    found[1] = item
+                    refresh = True
+            else:
+                contents.append(item)
+                refresh = True
+        writecontents(contents)
+        if os.path.exists(ibufpath):
+            os.remove(ibufpath)
+        if refresh:
+            widget.ct.refresh()
+    finally:
+        unlock(ibufpath)
 
 
 
@@ -716,7 +716,7 @@ class MyWidget(QtWidgets.QWidget):
         result = save(id,value)
         i = 0
         for item in getvaliddata()[0]:
-            if item["id"] == result["item"]["id"]:
+            if item["id"] == result["id"]:
                 break
             i=i+1
         self.refresh_list(i)
@@ -725,8 +725,18 @@ class MyWidget(QtWidgets.QWidget):
     def refresh_list(self, select=0):
         self.list.clear()
         tuple = getvaliddata()
-        self.init_list(self.list, tuple[0])
-        if tuple[0]:
+        distinctlist = []
+        itemmap = {}
+        for item in tuple[0]:
+            if item["id"] not in itemmap:
+                distinctlist.append(item)
+            else:
+                distinctlist.remove(itemmap[item["id"]])
+                distinctlist.append(item)
+            itemmap[item["id"]] = item       
+            
+        self.init_list(self.list, distinctlist)
+        if distinctlist:
             self.list.setCurrentRow(select)
         else:
             self.focus_edit()
@@ -748,13 +758,14 @@ class MyWidget(QtWidgets.QWidget):
             item: QtWidgets.QListWidgetItem = self.list.selectedItems()[0]
             id = item.data(Qt.ItemDataRole.UserRole)["id"]
             dr = delete(id)
-            select = dr["index"] - 1
-            if select < 0:
-                select  = 0
-            vall = getvaliddata()[0]
-            if select >= len(vall):
-                select = len(vall) - 1
-            self.refresh_list(select)
+            if dr:
+                select = self.list.currentIndex().row() -1
+                if select < 0:
+                    select  = 0
+                vall = getvaliddata()[0]
+                if select >= len(vall):
+                    select = len(vall) - 1
+                self.refresh_list(select)
         else:
             self.editText.rander({})
 
@@ -923,10 +934,10 @@ class Resquest(BaseHTTPRequestHandler):
             item = json.loads(s)
             # print(urllib.parse.parse_qs(urllib.parse.unquote(s)))#解释参数
             if "id" in item and "body" in item:
-                save(item["id"], item["body"])
+                save(item["id"], item["body"], item["mtime"])
                 widget.ct.refresh()
             elif "body" in item:
-                save(None, item["body"])
+                save(None, item["body"], item["mtime"])
                 widget.ct.refresh()
             else:
                 pass
@@ -934,7 +945,31 @@ class Resquest(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({"message":"ok"}).encode("utf-8"))
-        
+        if self.path == "/list":
+            s=str(self.rfile.read(int(self.headers['content-length'])),'UTF-8')#先解码     
+            print(s)
+            params = json.loads(s)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(getvaliddata()[0]).encode("utf-8"))
+        if self.path == "/one":
+            s=str(self.rfile.read(int(self.headers['content-length'])),'UTF-8')#先解码     
+            print(s)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            params = json.loads(s)
+            if "id" not in params:
+                self.wfile.write(json.dumps({}).encode("utf-8"))
+            else:
+                found = getitembyid(getvaliddata()[0],params["id"])
+                if found:
+                    self.wfile.write(json.dumps(found[1]).encode("utf-8"))
+                else:
+                    self.wfile.write(json.dumps({"id":params["id"], "value":"", "ctime":arrow.now().timestamp(), "mtime":arrow.now().timestamp()}).encode("utf-8"))
+            
 
 server = None
 def startserver():
