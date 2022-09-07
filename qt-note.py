@@ -103,6 +103,8 @@ def get_key():
     else:
         return None
 
+def get_pid_path():
+    return os.path.join(dirname(sys.argv[0]), "qt-note.pid")
 
 
 def getvaliddata():
@@ -976,6 +978,16 @@ def startserver():
 
 
 if __name__ == "__main__":
+    try:
+        if not os.path.exists(get_pid_path()):
+            writeFile(get_pid_path(), str(os.getpid()))
+        else:
+            print("another process is running.")
+            exit(1)
+    except:
+        os.remove(get_pid_path())
+        exit(1)
+
     interval_sec = 60*60
 
     app = QtWidgets.QApplication([])
@@ -1020,4 +1032,5 @@ if __name__ == "__main__":
     if dispatch_bs: dispatch_bs.shutdown()
     if git_bs: git_bs.shutdown()
     serverthread.join()
+    os.remove(get_pid_path())
     sys.exit(exitcode)
