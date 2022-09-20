@@ -2,7 +2,6 @@ from logging import Formatter, handlers
 from math import fabs
 from posixpath import dirname
 import sys
-from tkinter.tix import Tree
 import zlib
 
 from PySide6 import QtCore, QtWidgets, QtGui

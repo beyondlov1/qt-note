@@ -16,6 +16,7 @@ python3 Test.py
 sudo python3 setup.py install
 
 pip3 install apscheduler
+pip3 install pycryptodomex
 
 venv:
 cxfreeze qt-note.py --zip-include=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ --include-files=${VIRTUAL_ENV}/lib/python3.8/site-packages/TimeConverter-1.1.0-py3.8.egg/resource/ 
